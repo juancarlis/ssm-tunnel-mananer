@@ -40,15 +40,30 @@ uv tool install ssm-tunnel-manager
 
 For an upgrade from the package index, use `uv tool install --reinstall ssm-tunnel-manager`.
 
-This package-install step makes the `ssm-tunnel` command available.
-
-For a remote bootstrap flow, publish `scripts/install.sh` somewhere stable and run it as:
+To remove the supported packaged CLI again, run:
 
 ```bash
-curl -fsSL <installer-url> | sh
+uv tool uninstall ssm-tunnel-manager
 ```
 
-That script stays intentionally thin: it installs the published package from the configured Python package index with `uv tool install` or `uv tool install --reinstall`, then delegates runtime/config bootstrap to `ssm-tunnel install` with the self-install guard enabled. If you need to pin or override the package source, set `SSM_TUNNEL_PACKAGE_SPEC` before invoking the script.
+This package-install step makes the `ssm-tunnel` command available.
+
+For a remote bootstrap flow, use the raw GitHub URL for `scripts/install.sh`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/juancarlis/ssm-tunnel-mananer/main/scripts/install.sh | sh
+```
+
+That script stays intentionally thin: it installs the package with `uv tool install` or `uv tool install --reinstall`, then delegates runtime/config bootstrap to `ssm-tunnel install` with the self-install guard enabled.
+
+Until `ssm-tunnel-manager` is published to a package registry, set `SSM_TUNNEL_PACKAGE_SPEC` to the GitHub repository URL before invoking the installer:
+
+```bash
+SSM_TUNNEL_PACKAGE_SPEC="git+https://github.com/juancarlis/ssm-tunnel-mananer" \
+  curl -fsSL https://raw.githubusercontent.com/juancarlis/ssm-tunnel-mananer/main/scripts/install.sh | sh
+```
+
+Use the raw `raw.githubusercontent.com` script URL, not the GitHub page URL, and use the repository URL for `SSM_TUNNEL_PACKAGE_SPEC`.
 
 ## Configuration
 
@@ -111,6 +126,12 @@ Bootstrap the user-managed config path if you have not done so yet:
 
 ```bash
 uv run ssm-tunnel install
+```
+
+Remove the supported packaged CLI without deleting config, logs, or runtime state:
+
+```bash
+uv run ssm-tunnel uninstall
 ```
 
 Refresh AWS SSO credentials for the configured default profile:
@@ -207,6 +228,7 @@ Notes:
 - `login` runs `aws sso login --profile <defaults.aws.profile>` in the foreground, so the normal AWS CLI browser or device-code flow stays interactive in your terminal
 - `uv run ssm-tunnel install` from a repo checkout reinstalls the CLI globally with `uv tool install --reinstall /path/to/ssm-tunnel-manager` before bootstrapping runtime/config state
 - When already running from the globally installed command, `install` skips the reinstall step and just re-checks runtime/config state
+- `uninstall` runs `uv tool uninstall ssm-tunnel-manager` for the supported packaged install path and leaves `~/.local/share/ssm-tunnels/` untouched
 - `install` seeds only the packaged generic template; it never copies the repo's real config into your user-managed path
 - `scripts/install.sh` is the `curl ... | sh` entry point and defaults to installing the published package from the configured Python package index as `ssm-tunnel-manager`
 - `scripts/install.sh` uses `uv tool install` for first install, `uv tool install --reinstall` for upgrades, and then runs `ssm-tunnel install` with `SSM_TUNNEL_SKIP_SELF_INSTALL=1`
@@ -217,7 +239,7 @@ Notes:
 - `help` prints the command usage without loading tunnel config first
 - `tui` keeps the interactive flow action first, then prompts for action-specific tunnel selection
 - `tui` is powered by `fzf`, so action and tunnel selection use normal `fzf` behavior: arrow keys move through the list, typing filters matches, and `Enter` confirms the current selection
-- In `tui`, `login` is an action-only flow that dispatches the same shared `ssm-tunnel login` path without any tunnel prompt, `status` offers `all` or one tunnel, `stop` also exposes an explicit `all` choice alongside multi-select tunnel picking, `logs` remains single-tunnel only, `help` and `quit` are action-only flows, and lifecycle actions use `Tab` to mark multiple tunnels before confirming with `Enter`
+- In `tui`, `login` is an action-only flow that dispatches the same shared `ssm-tunnel login` path without any tunnel prompt, `uninstall` is an action-only flow that dispatches the shared `ssm-tunnel uninstall` path, `status` offers `all` or one tunnel, `stop` also exposes an explicit `all` choice alongside multi-select tunnel picking, `logs` remains single-tunnel only, `help` and `quit` are action-only flows, and lifecycle actions use `Tab` to mark multiple tunnels before confirming with `Enter`
 
 Using a non-default config file:
 

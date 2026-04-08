@@ -77,7 +77,17 @@ def test_tui_prompts_for_action_first_and_quit_exits_cleanly():
     assert selector.calls == [
         (
             "one",
-            ["status", "login", "start", "stop", "restart", "logs", "help", "quit"],
+            [
+                "status",
+                "login",
+                "start",
+                "stop",
+                "restart",
+                "logs",
+                "help",
+                "uninstall",
+                "quit",
+            ],
             "action > ",
             "Choose an action.",
         )
@@ -94,7 +104,17 @@ def test_tui_status_supports_all_tunnels_after_action_selection():
     assert selector.calls == [
         (
             "one",
-            ["status", "login", "start", "stop", "restart", "logs", "help", "quit"],
+            [
+                "status",
+                "login",
+                "start",
+                "stop",
+                "restart",
+                "logs",
+                "help",
+                "uninstall",
+                "quit",
+            ],
             "action > ",
             "Choose an action.",
         ),
@@ -170,6 +190,25 @@ def test_tui_login_returns_login_command_without_tunnel_prompt():
     selection = launch(build_config(), selector=selector)
 
     assert selection.command == "login"
+    assert len(selector.calls) == 1
+
+
+def test_tui_uninstall_returns_command_without_tunnel_prompt():
+    selector = FakeSelector(["uninstall"])
+
+    selection = launch(None, selector=selector)
+
+    assert selection.command == "uninstall"
+    assert len(selector.calls) == 1
+
+
+def test_tui_returns_selected_action_when_config_is_needed_later():
+    selector = FakeSelector(["start"])
+
+    selection = launch(None, selector=selector)
+
+    assert selection.command == "tui"
+    assert selection.action == "start"
     assert len(selector.calls) == 1
 
 

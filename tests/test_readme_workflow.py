@@ -40,6 +40,7 @@ def test_readme_documents_supported_uv_workflow_commands():
     assert documented_cli_commands >= {
         "help",
         "install",
+        "uninstall",
         "login",
         "list",
         "start",
@@ -93,6 +94,9 @@ def test_readme_documents_install_and_status_filters():
 
     assert "`~/.local/share/ssm-tunnels/config/tunnels.yaml`" in readme
     assert "`uv run ssm-tunnel install`" in readme
+    assert "`uv tool uninstall ssm-tunnel-manager`" in readme
+    assert "preserves any existing user config instead of overwriting it" in readme
+    assert "leaves `~/.local/share/ssm-tunnels/` untouched" in readme
     assert "`uv tool install --reinstall ssm-tunnel-manager`" in readme
     assert "uv run ssm-tunnel install" in readme
     assert "detects that checkout context and runs the reinstall step for you" in readme
@@ -124,5 +128,6 @@ def test_readme_documents_help_and_tui_workflow():
     assert "arrow keys move through the list" in readme
     assert "`Tab` to mark multiple tunnels" in readme
     assert "`login` is an action-only flow" in readme
+    assert "`uninstall` is an action-only flow" in readme
     assert "`logs` remains single-tunnel only" in readme
     assert "`status` offers `all`" in readme

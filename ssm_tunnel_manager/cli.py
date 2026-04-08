@@ -34,6 +34,7 @@ from ssm_tunnel_manager.state import load_runtime_state, update_tunnel_state
 
 
 SELF_INSTALL_SKIP_ENV = "SSM_TUNNEL_SKIP_SELF_INSTALL"
+PACKAGED_TOOL_NAME = "ssm-tunnel-manager"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,6 +52,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "install",
         help="Bootstrap config and self-install from a checkout when applicable",
+    )
+    subparsers.add_parser(
+        "uninstall",
+        help="Remove the packaged CLI installed via uv tool",
     )
     subparsers.add_parser("login", help="Run AWS SSO login for the default profile")
     subparsers.add_parser("list", help="Show configured tunnels")
@@ -95,24 +100,46 @@ def main(argv: list[str] | None = None) -> int:
         return _run_help_command(parser)
     if args.command == "install":
         return _run_install_command()
-
-    try:
-        config = load_config(args.config)
-    except ConfigError as exc:
-        parser.exit(status=2, message=f"Config error: {exc}\n")
+    if args.command == "uninstall":
+        return _run_uninstall_command()
 
     if args.command == "tui":
         from ssm_tunnel_manager.tui import SelectorError, launch
 
         try:
-            selection = launch(config)
+            selection = launch(None)
         except SelectorError as exc:
             parser.exit(status=4, message=f"TUI error: {exc}\n")
         if selection is None:
             return 0
-        args = selection
+        if selection.command == "help":
+            return _run_help_command(parser)
+        if selection.command == "uninstall":
+            return _run_uninstall_command()
 
+        config = _load_config_or_exit(args.config, parser)
+        if selection.command == "tui":
+            try:
+                selection = launch(config, action=selection.action)
+            except SelectorError as exc:
+                parser.exit(status=4, message=f"TUI error: {exc}\n")
+            if selection is None:
+                return 0
+
+        return _dispatch_command(selection, parser, config)
+
+    config = _load_config_or_exit(args.config, parser)
     return _dispatch_command(args, parser, config)
+
+
+def _load_config_or_exit(
+    config_path: str | None, parser: argparse.ArgumentParser
+) -> AppConfig:
+    try:
+        return load_config(config_path)
+    except ConfigError as exc:
+        parser.exit(status=2, message=f"Config error: {exc}\n")
+        raise AssertionError("unreachable")
 
 
 def _run_help_command(parser: argparse.ArgumentParser) -> int:
@@ -208,6 +235,33 @@ def _run_install_command() -> int:
 
     print(f"Runtime root: {runtime_root}")
     print(f"Edit config: {config_path}")
+    return 0
+
+
+def _run_uninstall_command() -> int:
+    try:
+        subprocess.run(
+            ["uv", "tool", "uninstall", PACKAGED_TOOL_NAME],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        print(
+            f"Uninstall error: 'uv' is required in PATH to uninstall {PACKAGED_TOOL_NAME}.",
+            file=sys.stderr,
+        )
+        return 4
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        print(
+            f"Uninstall error: uv tool uninstall {PACKAGED_TOOL_NAME} failed: {detail}",
+            file=sys.stderr,
+        )
+        return 5
+
+    print(f"Removed packaged CLI: {PACKAGED_TOOL_NAME}")
+    print("Preserved user data under ~/.local/share/ssm-tunnels/.")
     return 0
 
 

@@ -31,6 +31,7 @@ _ACTION_OPTIONS = (
     SelectorOption("restart", "restart"),
     SelectorOption("logs", "logs"),
     SelectorOption("help", "help"),
+    SelectorOption("uninstall", "uninstall"),
     SelectorOption("quit", "quit"),
 )
 
@@ -39,23 +40,29 @@ _MULTI_ALL_SENTINEL = "all"
 
 
 def launch(
-    config: AppConfig,
+    config: AppConfig | None,
     *,
     selector: Selector | None = None,
+    action: str | None = None,
 ) -> argparse.Namespace | None:
     active_selector = selector or Selector()
 
     try:
-        action = _select_action(active_selector)
-        if action == "quit":
+        selected_action = action or _select_action(active_selector)
+        if selected_action == "quit":
             return None
-        if action == "help":
+        if selected_action == "help":
             return argparse.Namespace(command="help")
-        if action == "login":
+        if selected_action == "login":
             return argparse.Namespace(command="login")
+        if selected_action == "uninstall":
+            return argparse.Namespace(command="uninstall")
+
+        if config is None:
+            return argparse.Namespace(command="tui", action=selected_action)
 
         tunnel_names = [tunnel.name for tunnel in config.effective_tunnels]
-        if action == "status":
+        if selected_action == "status":
             selection = active_selector.select_one(
                 [
                     _ALL_TUNNELS_OPTION,
@@ -68,10 +75,10 @@ def launch(
 
         if not tunnel_names:
             raise SelectorError(
-                f"The '{action}' action requires at least one configured tunnel."
+                f"The '{selected_action}' action requires at least one configured tunnel."
             )
 
-        if action == "logs":
+        if selected_action == "logs":
             name = active_selector.select_one(
                 [SelectorOption(name, name) for name in tunnel_names],
                 prompt="logs > ",
@@ -79,7 +86,7 @@ def launch(
             )
             return argparse.Namespace(command="logs", name=name)
 
-        if action == "stop":
+        if selected_action == "stop":
             names = active_selector.select_many(
                 [
                     _stop_all_option(),
@@ -94,10 +101,10 @@ def launch(
 
         names = active_selector.select_many(
             [SelectorOption(name, name) for name in tunnel_names],
-            prompt=f"{action} > ",
-            header=f"Choose one or more tunnels to {action}.",
+            prompt=f"{selected_action} > ",
+            header=f"Choose one or more tunnels to {selected_action}.",
         )
-        return argparse.Namespace(command=action, names=names, all=False)
+        return argparse.Namespace(command=selected_action, names=names, all=False)
     except SelectionCancelled:
         return None
 

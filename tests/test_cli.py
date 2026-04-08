@@ -9,7 +9,7 @@ import textwrap
 import pytest
 
 import ssm_tunnel_manager.cli as cli_module
-from ssm_tunnel_manager.cli import main
+from ssm_tunnel_manager.cli import build_parser, main
 from ssm_tunnel_manager.config import load_config as load_config_file
 from ssm_tunnel_manager.paths import packaged_template_config_text
 from ssm_tunnel_manager.models import (
@@ -228,6 +228,7 @@ def test_cli_help_command_prints_usage(capsys):
     out = capsys.readouterr().out
     assert "usage: ssm-tunnel" in out
     assert "help" in out
+    assert "uninstall" in out
     assert "login" in out
     assert "Bootstrap config and self-install from a checkout" in out
     assert "tui" in out
@@ -239,6 +240,121 @@ def test_cli_help_command_skips_config_loading(capsys):
     captured = capsys.readouterr()
     assert "usage: ssm-tunnel" in captured.out
     assert captured.err == ""
+
+
+def test_cli_uninstall_runs_supported_uv_tool_removal(monkeypatch, capsys):
+    calls = []
+
+    def fake_run(command, check, capture_output, text):
+        calls.append((command, check, capture_output, text))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run, raising=False)
+    monkeypatch.setattr(
+        cli_module,
+        "load_config",
+        lambda path=None: (_ for _ in ()).throw(
+            AssertionError("load_config should not run")
+        ),
+        raising=False,
+    )
+
+    assert main(["--config", "/does/not/exist.yaml", "uninstall"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Removed packaged CLI: ssm-tunnel-manager" in out
+    assert calls == [
+        (["uv", "tool", "uninstall", "ssm-tunnel-manager"], True, True, True)
+    ]
+
+
+def test_cli_uninstall_reports_missing_uv(monkeypatch, capsys):
+    def fake_run(command, check, capture_output, text):
+        raise FileNotFoundError("uv")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run, raising=False)
+
+    assert main(["uninstall"]) == 4
+
+    assert (
+        capsys.readouterr().err
+        == "Uninstall error: 'uv' is required in PATH to uninstall ssm-tunnel-manager.\n"
+    )
+
+
+def test_cli_uninstall_reports_uv_subprocess_failure(monkeypatch, capsys):
+    def fake_run(command, check, capture_output, text):
+        raise subprocess.CalledProcessError(
+            9,
+            command,
+            stderr="package removal failed",
+        )
+
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run, raising=False)
+
+    assert main(["uninstall"]) == 5
+
+    assert (
+        "Uninstall error: uv tool uninstall ssm-tunnel-manager failed: package removal failed"
+        in capsys.readouterr().err
+    )
+
+
+def test_cli_uninstall_leaves_seeded_user_files_unchanged(
+    tmp_path, monkeypatch, capsys
+):
+    runtime_root = tmp_path / "runtime"
+    seeded_files = {
+        runtime_root / "config" / "tunnels.yaml": "version: 1\n",
+        runtime_root / "logs" / "mysql.log": "existing log line\n",
+        runtime_root / "run" / "state.json": '{"mysql": {"status": "running"}}\n',
+        runtime_root / "run" / "mysql.pid": "4101\n",
+    }
+    for path, contents in seeded_files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents, encoding="utf-8")
+
+    before = {
+        path.relative_to(runtime_root): path.read_text(encoding="utf-8")
+        for path in seeded_files
+    }
+
+    def fake_run(command, check, capture_output, text):
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "ssm_tunnel_manager.paths.default_data_dir", lambda: runtime_root
+    )
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run, raising=False)
+
+    assert main(["uninstall"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Removed packaged CLI: ssm-tunnel-manager" in out
+    assert "Preserved user data under ~/.local/share/ssm-tunnels/." in out
+
+    after = {
+        path.relative_to(runtime_root): path.read_text(encoding="utf-8")
+        for path in seeded_files
+    }
+    assert after == before
+
+
+def test_cli_uninstall_parser_offers_no_cleanup_flags():
+    parser = build_parser()
+    uninstall_parser = parser._subparsers._group_actions[0].choices["uninstall"]
+
+    assert uninstall_parser.parse_args([]) == argparse.Namespace()
+    uninstall_help = uninstall_parser.format_help()
+    assert "--all" not in uninstall_help
+    assert "cleanup" not in uninstall_help
+    assert "delete" not in uninstall_help
+    assert "force" not in uninstall_help
+
+    with pytest.raises(SystemExit) as excinfo:
+        uninstall_parser.parse_args(["--delete-config"])
+
+    assert excinfo.value.code == 2
 
 
 def test_cli_login_runs_aws_sso_login_with_default_profile(cli_env, monkeypatch):
@@ -548,6 +664,69 @@ def test_cli_tui_login_selection_dispatches_through_shared_login_path(
     assert main(["--config", str(config_path), "tui"]) == 0
 
     assert calls == [(["aws", "sso", "login", "--profile", "team-profile"], False)]
+
+
+def test_cli_tui_uninstall_selection_dispatches_without_loading_config(
+    monkeypatch, capsys
+):
+    calls = []
+
+    monkeypatch.setattr(
+        "ssm_tunnel_manager.tui.launch",
+        lambda config, **kwargs: argparse.Namespace(command="uninstall"),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "load_config",
+        lambda path=None: (_ for _ in ()).throw(
+            AssertionError("load_config should not run")
+        ),
+        raising=False,
+    )
+
+    def fake_run(command, check, capture_output, text):
+        calls.append((command, check, capture_output, text))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run, raising=False)
+
+    assert main(["--config", "/does/not/exist.yaml", "tui"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Removed packaged CLI: ssm-tunnel-manager" in out
+    assert calls == [
+        (["uv", "tool", "uninstall", "ssm-tunnel-manager"], True, True, True)
+    ]
+
+
+def test_cli_tui_loads_config_after_selecting_tunnel_backed_action(
+    cli_env, monkeypatch, capsys
+):
+    config_path, _runtime_root, _backend = cli_env
+    launch_calls = []
+
+    def fake_launch(config, *, selector=None, action=None):
+        launch_calls.append((config, action))
+        if config is None:
+            return argparse.Namespace(command="tui", action="status")
+        return argparse.Namespace(command="status", name=None)
+
+    monkeypatch.setattr("ssm_tunnel_manager.tui.launch", fake_launch)
+
+    assert main(["--config", str(config_path), "tui"]) == 0
+
+    out = capsys.readouterr().out
+    assert_summary_table(
+        out,
+        [
+            summary_cells("mysql", "stopped", "enabled", 13306),
+            summary_cells("redis", "stopped", "enabled", 16379),
+            summary_cells("admin", "stopped", "disabled", 18443),
+        ],
+    )
+    assert launch_calls[0] == (None, None)
+    assert launch_calls[1][1] == "status"
+    assert launch_calls[1][0].effective_tunnels
 
 
 def test_cli_tui_reports_selector_errors(cli_env, monkeypatch, capsys):
