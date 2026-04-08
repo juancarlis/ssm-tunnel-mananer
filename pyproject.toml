@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ssm-tunnel-manager"
+version = "0.1.0"
+description = "Terminal-first AWS SSM tunnel manager"
+requires-python = ">=3.11"
+dependencies = [
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "build>=1.2",
+  "pytest>=8.0",
+]
+
+[project.scripts]
+ssm-tunnel = "ssm_tunnel_manager.cli:main"
+
+[tool.uv]
+package = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["ssm_tunnel_manager*"]
+
+[tool.setuptools.package-data]
+ssm_tunnel_manager = ["templates/*.yaml"]

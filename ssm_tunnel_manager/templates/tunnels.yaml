@@ -1,0 +1,12 @@
+version: 1
+
+defaults:
+  aws:
+    region: us-east-1
+    target: i-your-ssm-target
+    profile: your-aws-profile
+    document: AWS-StartPortForwardingSessionToRemoteHost
+  ui:
+    backend: tmux
+
+tunnels: []
