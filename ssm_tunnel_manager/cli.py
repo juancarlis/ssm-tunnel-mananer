@@ -20,6 +20,7 @@ from ssm_tunnel_manager.logs import (
 )
 from ssm_tunnel_manager.models import (
     AppConfig,
+    DesiredTunnelState,
     EffectiveTunnel,
     RuntimeStatus,
     TunnelRuntimeState,
@@ -366,6 +367,7 @@ def _run_start_tunnel(
     runtime_state = TunnelRuntimeState(
         name=tunnel.name,
         status=RuntimeStatus.RUNNING,
+        desired_state=DesiredTunnelState.RUNNING,
         backend=config.defaults.backend,
         pid=result.pid,
         started_at=_timestamp(),
@@ -391,12 +393,33 @@ def _run_stop_command(
 
 
 def _run_stop_tunnel(
-    config: AppConfig, tunnel: EffectiveTunnel, parser: argparse.ArgumentParser
+    config: AppConfig,
+    tunnel: EffectiveTunnel,
+    parser: argparse.ArgumentParser,
+    *,
+    set_desired_stopped: bool = True,
 ) -> int:
     runtime_states = load_runtime_state()
     runtime_state = runtime_states.get(tunnel.name)
     status, runtime_state = _resolve_tunnel_status(config, tunnel, runtime_states)
     if runtime_state is None or status is RuntimeStatus.STOPPED:
+        if set_desired_stopped:
+            update_tunnel_state(
+                TunnelRuntimeState(
+                    name=tunnel.name,
+                    status=RuntimeStatus.STOPPED,
+                    desired_state=DesiredTunnelState.STOPPED,
+                    backend=(
+                        runtime_state.backend
+                        if runtime_state is not None
+                        else config.defaults.backend
+                    ),
+                    log_path=(
+                        runtime_state.log_path if runtime_state is not None else None
+                    ),
+                    last_health_check_at=_timestamp(),
+                )
+            )
         print(f"Tunnel '{tunnel.name}' is not running.")
         return 0
 
@@ -416,6 +439,11 @@ def _run_stop_tunnel(
     stopped_state = replace(
         runtime_state,
         status=RuntimeStatus.STOPPED,
+        desired_state=(
+            DesiredTunnelState.STOPPED
+            if set_desired_stopped
+            else runtime_state.desired_state
+        ),
         pid=None,
         backend_session=None,
         last_health_check_at=_timestamp(),
@@ -441,12 +469,13 @@ def _run_restart_tunnel(
     config: AppConfig, tunnel: EffectiveTunnel, parser: argparse.ArgumentParser
 ) -> int:
     runtime_states = load_runtime_state()
-    status, _runtime_state = _resolve_tunnel_status(config, tunnel, runtime_states)
-    if status not in {RuntimeStatus.RUNNING, RuntimeStatus.DEGRADED}:
+    status, runtime_state = _resolve_tunnel_status(config, tunnel, runtime_states)
+    if not _should_restart_tunnel(runtime_state):
         print(f"Skipped tunnel '{tunnel.name}' ({status.value}; unchanged).")
         return 0
 
-    _run_stop_tunnel(config, tunnel, parser)
+    if status in {RuntimeStatus.RUNNING, RuntimeStatus.DEGRADED}:
+        _run_stop_tunnel(config, tunnel, parser, set_desired_stopped=False)
     _run_start_tunnel(config, tunnel, parser)
     print(f"Restarted tunnel '{tunnel.name}'.")
     return 0
@@ -653,10 +682,16 @@ def _ensure_dependencies(
 
 def _record_failure(name: str, backend: str, log_path, error_summary: str) -> None:
     append_tunnel_log(name, f"[{_timestamp()}] error: {error_summary}")
+    existing_state = load_runtime_state().get(name)
     update_tunnel_state(
         TunnelRuntimeState(
             name=name,
             status=RuntimeStatus.FAILED,
+            desired_state=(
+                existing_state.desired_state
+                if existing_state is not None
+                else DesiredTunnelState.RUNNING
+            ),
             backend=backend,
             last_health_check_at=_timestamp(),
             log_path=str(log_path),
@@ -681,6 +716,13 @@ def _build_tunnel_summary_row(
     enabled = "enabled" if tunnel.enabled else "disabled"
     summary = _status_summary(runtime_state)
     return (tunnel.name, status.value, enabled, str(tunnel.local_port), summary)
+
+
+def _should_restart_tunnel(runtime_state: TunnelRuntimeState | None) -> bool:
+    return (
+        runtime_state is not None
+        and runtime_state.desired_state is DesiredTunnelState.RUNNING
+    )
 
 
 def _build_status_filters(

@@ -10,6 +10,7 @@ from ssm_tunnel_manager.logs import (
 )
 from ssm_tunnel_manager.models import (
     AwsSettings,
+    DesiredTunnelState,
     EffectiveTunnel,
     RuntimeStatus,
     TunnelRuntimeState,
@@ -91,11 +92,38 @@ def test_persists_runtime_state_to_json(tmp_path):
     state = load_runtime_state(tmp_path)
 
     assert state["mysql"].status is RuntimeStatus.RUNNING
+    assert state["mysql"].desired_state is DesiredTunnelState.STOPPED
     assert state["mysql"].pid == 4242
     assert (
         json.loads(runtime_state_path(tmp_path).read_text(encoding="utf-8"))["version"]
         == 1
     )
+
+
+def test_runtime_state_loads_legacy_running_entries_with_running_desired_state(
+    tmp_path,
+):
+    ensure_runtime_dirs(tmp_path)
+    runtime_state_path(tmp_path).write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "tunnels": {
+                    "mysql": {
+                        "status": "running",
+                        "backend": "tmux",
+                        "pid": 4242,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = load_runtime_state(tmp_path)
+
+    assert state["mysql"].status is RuntimeStatus.RUNNING
+    assert state["mysql"].desired_state is DesiredTunnelState.RUNNING
 
 
 def test_remove_tunnel_state_updates_state_file(tmp_path):

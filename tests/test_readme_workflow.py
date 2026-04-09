@@ -26,8 +26,9 @@ def test_readme_documents_supported_uv_workflow_commands():
     assert "uv run python -m build" in readme
     assert "uv run ssm-tunnel" in readme
     assert "curl -fsSL <installer-url> | sh" in readme
+    assert "desired `running`" in readme
     assert (
-        "`restart` only restarts selected tunnels that are currently `running` or `degraded`"
+        "Enabled tunnels that were never started are still skipped by `restart --all`"
         in readme
     )
 

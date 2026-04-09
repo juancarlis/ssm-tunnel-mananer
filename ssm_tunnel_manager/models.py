@@ -12,6 +12,11 @@ class RuntimeStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class DesiredTunnelState(StrEnum):
+    RUNNING = "running"
+    STOPPED = "stopped"
+
+
 @dataclass(slots=True)
 class AwsSettings:
     region: str | None = None
@@ -77,6 +82,7 @@ class EffectiveTunnel:
 class TunnelRuntimeState:
     name: str
     status: RuntimeStatus = RuntimeStatus.STOPPED
+    desired_state: DesiredTunnelState = DesiredTunnelState.STOPPED
     backend: str = "tmux"
     pid: int | None = None
     started_at: str | None = None

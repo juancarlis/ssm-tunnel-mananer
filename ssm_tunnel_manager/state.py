@@ -4,7 +4,11 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from ssm_tunnel_manager.models import RuntimeStatus, TunnelRuntimeState
+from ssm_tunnel_manager.models import (
+    DesiredTunnelState,
+    RuntimeStatus,
+    TunnelRuntimeState,
+)
 from ssm_tunnel_manager.paths import ensure_runtime_dirs, runtime_state_path
 
 
@@ -66,6 +70,7 @@ def remove_tunnel_state(
 def _serialize_tunnel_state(state: TunnelRuntimeState) -> dict[str, object]:
     payload = asdict(state)
     payload["status"] = state.status.value
+    payload["desired_state"] = state.desired_state.value
     return payload
 
 
@@ -74,9 +79,14 @@ def _deserialize_tunnel_state(
 ) -> TunnelRuntimeState:
     status = payload.get("status", RuntimeStatus.UNKNOWN.value)
     status_value = RuntimeStatus(status)
+    desired_state = payload.get(
+        "desired_state", _default_desired_state_for_status(status_value).value
+    )
+    desired_state_value = DesiredTunnelState(desired_state)
     return TunnelRuntimeState(
         name=name,
         status=status_value,
+        desired_state=desired_state_value,
         backend=_optional_str(payload.get("backend")) or "tmux",
         pid=_optional_int(payload.get("pid")),
         started_at=_optional_str(payload.get("started_at")),
@@ -94,3 +104,9 @@ def _optional_str(value: object) -> str | None:
 
 def _optional_int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _default_desired_state_for_status(status: RuntimeStatus) -> DesiredTunnelState:
+    if status in {RuntimeStatus.RUNNING, RuntimeStatus.DEGRADED, RuntimeStatus.FAILED}:
+        return DesiredTunnelState.RUNNING
+    return DesiredTunnelState.STOPPED

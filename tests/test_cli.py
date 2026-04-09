@@ -15,6 +15,7 @@ from ssm_tunnel_manager.paths import packaged_template_config_text
 from ssm_tunnel_manager.models import (
     BackendInspection,
     BackendStartResult,
+    DesiredTunnelState,
     DependencyCheck,
     RuntimeStatus,
     TunnelRuntimeState,
@@ -186,6 +187,7 @@ def test_cli_dispatches_lifecycle_commands(cli_env, capsys):
 
     state = load_runtime_state(runtime_root)
     assert state["mysql"].status is RuntimeStatus.RUNNING
+    assert state["mysql"].desired_state is DesiredTunnelState.RUNNING
     assert state["mysql"].backend_session == "ssm-tunnel-mysql"
 
     assert main(["--config", str(config_path), "status", "mysql"]) == 0
@@ -211,6 +213,7 @@ def test_cli_dispatches_lifecycle_commands(cli_env, capsys):
 
     state = load_runtime_state(runtime_root)
     assert state["mysql"].status is RuntimeStatus.STOPPED
+    assert state["mysql"].desired_state is DesiredTunnelState.STOPPED
     assert state["mysql"].pid is None
 
 
@@ -524,6 +527,7 @@ def test_cli_stop_and_restart_only_require_tmux_for_stop_phase(
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4101,
             backend_session="ssm-tunnel-mysql",
@@ -552,6 +556,7 @@ def test_cli_stop_and_restart_only_require_tmux_for_stop_phase(
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4102,
             backend_session="ssm-tunnel-mysql",
@@ -623,6 +628,7 @@ def test_cli_tui_selection_dispatches_through_shared_runtime(
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4101,
             backend_session="ssm-tunnel-mysql",
@@ -749,6 +755,7 @@ def test_cli_status_without_name_shows_all_tunnels(cli_env, capsys):
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4101,
             backend_session="ssm-tunnel-mysql",
@@ -776,6 +783,7 @@ def test_cli_status_filters_apply_to_global_summary_only(cli_env, capsys):
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4101,
             backend_session="ssm-tunnel-mysql",
@@ -1051,6 +1059,7 @@ def test_cli_status_with_name_keeps_detailed_view(cli_env, capsys):
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4101,
             backend_session="ssm-tunnel-mysql",
@@ -1122,6 +1131,7 @@ def test_cli_start_supports_multiple_names_in_config_order(cli_env, capsys):
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4101,
             backend_session="ssm-tunnel-mysql",
@@ -1217,6 +1227,7 @@ def test_cli_stop_supports_multiple_names_in_config_order(cli_env, capsys):
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4101,
             backend_session="ssm-tunnel-mysql",
@@ -1227,6 +1238,7 @@ def test_cli_stop_supports_multiple_names_in_config_order(cli_env, capsys):
         TunnelRuntimeState(
             name="redis",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4102,
             backend_session="ssm-tunnel-redis",
@@ -1248,6 +1260,7 @@ def test_cli_stop_all_visits_all_selected_tunnels(cli_env, capsys):
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4101,
             backend_session="ssm-tunnel-mysql",
@@ -1270,6 +1283,7 @@ def test_cli_restart_supports_multiple_names_in_config_order(cli_env, capsys):
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4101,
             backend_session="ssm-tunnel-mysql",
@@ -1352,6 +1366,7 @@ def test_cli_restart_all_supports_all_enabled_tunnels(tmp_path, monkeypatch, cap
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4101,
             backend_session="ssm-tunnel-mysql",
@@ -1362,6 +1377,7 @@ def test_cli_restart_all_supports_all_enabled_tunnels(tmp_path, monkeypatch, cap
         TunnelRuntimeState(
             name="redis",
             status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4102,
             backend_session="ssm-tunnel-redis",
@@ -1379,6 +1395,150 @@ def test_cli_restart_all_supports_all_enabled_tunnels(tmp_path, monkeypatch, cap
     assert [call[0] for call in backend.start_calls] == ["mysql", "redis"]
 
 
+def test_cli_restart_all_restarts_stopped_tunnel_when_desired_state_is_running(
+    tmp_path, monkeypatch, capsys
+):
+    runtime_root = tmp_path / "runtime"
+    config_path = write_config(
+        tmp_path,
+        tunnels_yaml=textwrap.dedent(
+            """
+        tunnels:
+          - name: mysql
+            remote_host: db.internal
+            remote_port: 3306
+            local_port: 13306
+          - name: redis
+            remote_host: cache.internal
+            remote_port: 6379
+            local_port: 16379
+        """
+        ).strip(),
+    )
+    backend = FakeBackend()
+    monkeypatch.setattr(
+        "ssm_tunnel_manager.paths.default_data_dir", lambda: runtime_root
+    )
+    monkeypatch.setattr("ssm_tunnel_manager.cli.get_backend", lambda name: backend)
+    monkeypatch.setattr(
+        "ssm_tunnel_manager.cli.check_dependencies",
+        lambda backend_name: [
+            DependencyCheck(name="aws", ok=True, details="aws CLI found"),
+            DependencyCheck(
+                name="session-manager-plugin",
+                ok=True,
+                details="session-manager-plugin found",
+            ),
+            DependencyCheck(name="tmux", ok=True, details="tmux found"),
+        ],
+    )
+    update_tunnel_state(
+        TunnelRuntimeState(
+            name="mysql",
+            status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
+            backend="tmux",
+            pid=4101,
+            backend_session="ssm-tunnel-mysql",
+        ),
+        runtime_root,
+    )
+    monkeypatch.setattr(
+        "ssm_tunnel_manager.cli.evaluate_tunnel_health",
+        lambda tunnel, runtime_state, backend_inspection=None: RuntimeStatus.STOPPED
+        if runtime_state and runtime_state.name == "mysql"
+        else RuntimeStatus.STOPPED,
+    )
+
+    assert main(["--config", str(config_path), "restart", "--all"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Restarted tunnel 'mysql'." in out
+    assert "Skipped tunnel 'redis' (stopped; unchanged)." in out
+    assert backend.stop_calls == []
+    assert [call[0] for call in backend.start_calls] == ["mysql"]
+
+    state = load_runtime_state(runtime_root)
+    assert state["mysql"].status is RuntimeStatus.RUNNING
+    assert state["mysql"].desired_state is DesiredTunnelState.RUNNING
+
+
+def test_cli_stop_marks_dead_tunnel_as_intentionally_stopped(
+    cli_env, monkeypatch, capsys
+):
+    config_path, runtime_root, _backend = cli_env
+    update_tunnel_state(
+        TunnelRuntimeState(
+            name="mysql",
+            status=RuntimeStatus.RUNNING,
+            desired_state=DesiredTunnelState.RUNNING,
+            backend="tmux",
+            pid=4101,
+            backend_session="ssm-tunnel-mysql",
+        ),
+        runtime_root,
+    )
+    monkeypatch.setattr(
+        "ssm_tunnel_manager.cli.evaluate_tunnel_health",
+        lambda tunnel, runtime_state, backend_inspection=None: RuntimeStatus.STOPPED,
+    )
+
+    assert main(["--config", str(config_path), "stop", "mysql"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Tunnel 'mysql' is not running." in out
+    state = load_runtime_state(runtime_root)
+    assert state["mysql"].status is RuntimeStatus.STOPPED
+    assert state["mysql"].desired_state is DesiredTunnelState.STOPPED
+
+
+def test_cli_restart_all_does_not_start_enabled_tunnel_without_runtime_intent(
+    tmp_path, monkeypatch, capsys
+):
+    runtime_root = tmp_path / "runtime"
+    config_path = write_config(
+        tmp_path,
+        tunnels_yaml=textwrap.dedent(
+            """
+        tunnels:
+          - name: mysql
+            remote_host: db.internal
+            remote_port: 3306
+            local_port: 13306
+          - name: redis
+            remote_host: cache.internal
+            remote_port: 6379
+            local_port: 16379
+        """
+        ).strip(),
+    )
+    backend = FakeBackend()
+    monkeypatch.setattr(
+        "ssm_tunnel_manager.paths.default_data_dir", lambda: runtime_root
+    )
+    monkeypatch.setattr("ssm_tunnel_manager.cli.get_backend", lambda name: backend)
+    monkeypatch.setattr(
+        "ssm_tunnel_manager.cli.check_dependencies",
+        lambda backend_name: [
+            DependencyCheck(name="aws", ok=True, details="aws CLI found"),
+            DependencyCheck(
+                name="session-manager-plugin",
+                ok=True,
+                details="session-manager-plugin found",
+            ),
+            DependencyCheck(name="tmux", ok=True, details="tmux found"),
+        ],
+    )
+
+    assert main(["--config", str(config_path), "restart", "--all"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Skipped tunnel 'mysql' (stopped; unchanged)." in out
+    assert "Skipped tunnel 'redis' (stopped; unchanged)." in out
+    assert backend.start_calls == []
+    assert backend.stop_calls == []
+
+
 def test_cli_restart_restarts_degraded_tunnel_but_skips_stopped_tunnel(
     cli_env, monkeypatch, capsys
 ):
@@ -1387,6 +1547,7 @@ def test_cli_restart_restarts_degraded_tunnel_but_skips_stopped_tunnel(
         TunnelRuntimeState(
             name="mysql",
             status=RuntimeStatus.DEGRADED,
+            desired_state=DesiredTunnelState.RUNNING,
             backend="tmux",
             pid=4101,
             backend_session="ssm-tunnel-mysql",

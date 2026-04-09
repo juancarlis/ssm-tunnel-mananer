@@ -51,6 +51,12 @@ This package-install step makes the `ssm-tunnel` command available.
 For a remote bootstrap flow, use the raw GitHub URL for `scripts/install.sh`:
 
 ```bash
+curl -fsSL <installer-url> | sh
+```
+
+Concretely for this repository:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/juancarlis/ssm-tunnel-mananer/main/scripts/install.sh | sh
 ```
 
@@ -234,7 +240,9 @@ Notes:
 - `scripts/install.sh` uses `uv tool install` for first install, `uv tool install --reinstall` for upgrades, and then runs `ssm-tunnel install` with `SSM_TUNNEL_SKIP_SELF_INSTALL=1`
 - `start`, `stop`, and `restart` accept multiple tunnel names in one command
 - `--all` is supported for `start`, `stop`, and `restart`
-- `restart` only restarts selected tunnels that are currently `running` or `degraded`; stopped tunnels are reported as skipped and left unchanged
+- `start` marks the selected tunnels as desired `running`; `stop` marks them as desired `stopped`
+- `restart` only restarts selected tunnels whose desired state is `running`, including tunnels whose last known runtime status has fallen back to `stopped` after the SSM session died on its own
+- Enabled tunnels that were never started are still skipped by `restart --all`
 - `logs` remains single-tunnel only
 - `help` prints the command usage without loading tunnel config first
 - `tui` keeps the interactive flow action first, then prompts for action-specific tunnel selection
@@ -282,7 +290,7 @@ with stdout/stderr appended to the tunnel log file.
 Current MVP behavior to be aware of:
 
 - Tunnel health is inferred from the stored PID, the tracked `tmux` session, and whether the local port is listening
-- `restart` performs `stop` first, then `start`, but only for selected tunnels that are already `running` or `degraded`
+- `restart` performs `stop` first, then `start`, for tunnels whose persisted desired state is still `running`; if the tunnel already died and now resolves to `stopped`, restart goes straight to `start`
 - If `stop` succeeds but `start` fails, the tunnel remains stopped
 - `stop` depends on the saved `tmux` session reference; if that reference is missing, stop fails even if a matching process still exists
 
