@@ -96,7 +96,7 @@ def test_installer_uses_plain_uv_install_for_first_install(tmp_path):
     assert result.stderr == ""
     assert (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines() == [
         "uv tool install ssm-tunnel-manager==0.1.0",
-        "ssm-tunnel install",
+        "ssm-tunnel upgrade",
     ]
     assert (tmp_path / "env.log").read_text(encoding="utf-8").splitlines() == ["skip=1"]
     assert list(tmp_path.glob("ssm-tunnel-install.*")) == []
@@ -113,8 +113,8 @@ def test_installer_uses_reinstall_when_command_already_exists(tmp_path):
     assert result.returncode == 0
     assert result.stderr == ""
     assert (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines() == [
-        "uv tool install --reinstall ssm-tunnel-manager",
-        "ssm-tunnel install",
+        "uv tool install --reinstall git+https://github.com/juancarlis/ssm-tunnel-mananer.git",
+        "ssm-tunnel upgrade",
     ]
     assert (tmp_path / "env.log").read_text(encoding="utf-8").splitlines() == ["skip=1"]
 
@@ -137,5 +137,27 @@ def test_installer_cleans_up_temp_file_after_failure(tmp_path):
     result = run_installer(tmp_path, {"UV_EXIT_CODE": "9"}, include_system_path=False)
 
     assert result.returncode != 0
-    assert "Install error: uv tool install ssm-tunnel-manager failed." in result.stderr
+    assert (
+        "Install error: uv tool install git+https://github.com/juancarlis/ssm-tunnel-mananer.git failed."
+        in result.stderr
+    )
     assert list(tmp_path.glob("ssm-tunnel-install.*")) == []
+
+
+def test_installer_defaults_to_public_github_package_spec(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_uv_stub(bin_dir)
+    write_ssm_tunnel_stub(bin_dir, name="ssm-tunnel-installed")
+
+    result = run_installer(
+        tmp_path,
+        {"CREATE_SSM_TUNNEL_AFTER_UV": "1"},
+        include_system_path=False,
+    )
+
+    assert result.returncode == 0
+    assert (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines() == [
+        "uv tool install git+https://github.com/juancarlis/ssm-tunnel-mananer.git",
+        "ssm-tunnel upgrade",
+    ]

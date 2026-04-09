@@ -79,6 +79,7 @@ def test_tui_prompts_for_action_first_and_quit_exits_cleanly():
             "one",
             [
                 "status",
+                "upgrade",
                 "login",
                 "start",
                 "stop",
@@ -106,6 +107,7 @@ def test_tui_status_supports_all_tunnels_after_action_selection():
             "one",
             [
                 "status",
+                "upgrade",
                 "login",
                 "start",
                 "stop",
@@ -181,6 +183,15 @@ def test_tui_help_returns_help_command_without_tunnel_prompt():
     selection = launch(build_config("mysql"), selector=selector)
 
     assert selection.command == "help"
+    assert len(selector.calls) == 1
+
+
+def test_tui_upgrade_returns_command_without_tunnel_prompt():
+    selector = FakeSelector(["upgrade"])
+
+    selection = launch(build_config("mysql"), selector=selector)
+
+    assert selection.command == "upgrade"
     assert len(selector.calls) == 1
 
 

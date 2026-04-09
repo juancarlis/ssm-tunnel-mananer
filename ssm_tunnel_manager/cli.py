@@ -26,7 +26,6 @@ from ssm_tunnel_manager.models import (
     TunnelRuntimeState,
 )
 from ssm_tunnel_manager.paths import (
-    detect_checkout_install_root,
     default_config_path,
     ensure_runtime_dirs,
     packaged_template_config_text,
@@ -35,7 +34,9 @@ from ssm_tunnel_manager.state import load_runtime_state, update_tunnel_state
 
 
 SELF_INSTALL_SKIP_ENV = "SSM_TUNNEL_SKIP_SELF_INSTALL"
+PACKAGE_SPEC_ENV = "SSM_TUNNEL_PACKAGE_SPEC"
 PACKAGED_TOOL_NAME = "ssm-tunnel-manager"
+DEFAULT_PACKAGE_SPEC = "git+https://github.com/juancarlis/ssm-tunnel-mananer.git"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,8 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("help", help="Show command usage")
     subparsers.add_parser(
-        "install",
-        help="Bootstrap config and self-install from a checkout when applicable",
+        "upgrade",
+        help="Upgrade the packaged CLI and bootstrap runtime/config state",
     )
     subparsers.add_parser(
         "uninstall",
@@ -99,8 +100,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "help":
         return _run_help_command(parser)
-    if args.command == "install":
-        return _run_install_command()
+    if args.command == "upgrade":
+        return _run_upgrade_command()
     if args.command == "uninstall":
         return _run_uninstall_command()
 
@@ -115,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if selection.command == "help":
             return _run_help_command(parser)
+        if selection.command == "upgrade":
+            return _run_upgrade_command()
         if selection.command == "uninstall":
             return _run_uninstall_command()
 
@@ -215,13 +218,9 @@ def _run_list_command(config: AppConfig) -> int:
     return 0
 
 
-def _run_install_command() -> int:
-    checkout_root = None
+def _run_upgrade_command() -> int:
     if os.environ.get(SELF_INSTALL_SKIP_ENV) != "1":
-        checkout_root = detect_checkout_install_root()
-
-    if checkout_root is not None:
-        install_status = _install_global_command(checkout_root)
+        install_status = _upgrade_global_command()
         if install_status != 0:
             return install_status
 
@@ -293,13 +292,18 @@ def _resolve_login_profile(config: AppConfig, parser: argparse.ArgumentParser) -
     raise AssertionError("unreachable")
 
 
-def _install_global_command(checkout_root) -> int:
+def _package_spec() -> str:
+    return os.environ.get(PACKAGE_SPEC_ENV, DEFAULT_PACKAGE_SPEC)
+
+
+def _upgrade_global_command() -> int:
     env = dict(os.environ)
     env[SELF_INSTALL_SKIP_ENV] = "1"
+    package_spec = _package_spec()
 
     try:
         subprocess.run(
-            ["uv", "tool", "install", "--reinstall", str(checkout_root)],
+            ["uv", "tool", "install", "--reinstall", package_spec],
             check=True,
             capture_output=True,
             text=True,
@@ -307,19 +311,19 @@ def _install_global_command(checkout_root) -> int:
         )
     except FileNotFoundError:
         print(
-            "Install error: checkout-driven install requires 'uv' in PATH.",
+            "Upgrade error: 'uv' is required in PATH to upgrade ssm-tunnel-manager.",
             file=sys.stderr,
         )
         return 4
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or str(exc)).strip()
         print(
-            f"Install error: failed to install global command from checkout {checkout_root}: {detail}",
+            f"Upgrade error: uv tool install --reinstall {package_spec} failed: {detail}",
             file=sys.stderr,
         )
         return 5
 
-    print(f"Installed or upgraded global command from checkout: {checkout_root}")
+    print(f"Upgraded packaged CLI from: {package_spec}")
     return 0
 
 

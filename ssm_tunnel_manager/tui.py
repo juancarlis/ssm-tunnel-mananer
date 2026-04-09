@@ -25,6 +25,7 @@ class SelectorOption:
 
 _ACTION_OPTIONS = (
     SelectorOption("status", "status"),
+    SelectorOption("upgrade", "upgrade"),
     SelectorOption("login", "login"),
     SelectorOption("start", "start"),
     SelectorOption("stop", "stop"),
@@ -53,6 +54,8 @@ def launch(
             return None
         if selected_action == "help":
             return argparse.Namespace(command="help")
+        if selected_action == "upgrade":
+            return argparse.Namespace(command="upgrade")
         if selected_action == "login":
             return argparse.Namespace(command="login")
         if selected_action == "uninstall":

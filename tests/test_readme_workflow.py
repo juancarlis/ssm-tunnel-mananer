@@ -40,7 +40,7 @@ def test_readme_documents_supported_uv_workflow_commands():
     }
     assert documented_cli_commands >= {
         "help",
-        "install",
+        "upgrade",
         "uninstall",
         "login",
         "list",
@@ -94,16 +94,18 @@ def test_readme_documents_install_and_status_filters():
     readme = read_text(README_PATH)
 
     assert "`~/.local/share/ssm-tunnels/config/tunnels.yaml`" in readme
-    assert "`uv run ssm-tunnel install`" in readme
+    assert "`uv run ssm-tunnel upgrade`" in readme
     assert "`uv tool uninstall ssm-tunnel-manager`" in readme
     assert "preserves any existing user config instead of overwriting it" in readme
     assert "leaves `~/.local/share/ssm-tunnels/` untouched" in readme
-    assert "`uv tool install --reinstall ssm-tunnel-manager`" in readme
-    assert "uv run ssm-tunnel install" in readme
-    assert "detects that checkout context and runs the reinstall step for you" in readme
-    assert "already running from the globally installed command" in readme
+    assert (
+        "`uv tool install --reinstall git+https://github.com/juancarlis/ssm-tunnel-mananer.git`"
+        in readme
+    )
+    assert "uv run ssm-tunnel upgrade" in readme
+    assert "updates the packaged CLI from the public GitHub repository" in readme
     assert "template config only if it does not already exist" in readme
-    assert "published package from the configured Python package index" in readme
+    assert "git+https://github.com/juancarlis/ssm-tunnel-mananer.git" in readme
     assert "`SSM_TUNNEL_PACKAGE_SPEC`" in readme
     assert "uv run ssm-tunnel login" in readme
     assert "aws sso login --profile <defaults.aws.profile>" in readme
@@ -128,7 +130,19 @@ def test_readme_documents_help_and_tui_workflow():
     assert "normal `fzf` behavior" in readme
     assert "arrow keys move through the list" in readme
     assert "`Tab` to mark multiple tunnels" in readme
-    assert "`login` is an action-only flow" in readme
-    assert "`uninstall` is an action-only flow" in readme
+    assert "`upgrade`, `login`, and `uninstall` are action-only flows" in readme
     assert "`logs` remains single-tunnel only" in readme
     assert "`status` offers `all`" in readme
+
+
+def test_readme_documents_explicit_remote_install_flow():
+    readme = read_text(README_PATH)
+
+    assert (
+        'export SSM_TUNNEL_PACKAGE_SPEC="git+https://github.com/juancarlis/ssm-tunnel-mananer.git"'
+        in readme
+    )
+    assert (
+        "curl -fsSL https://raw.githubusercontent.com/juancarlis/ssm-tunnel-mananer/main/scripts/install.sh | sh"
+        in readme
+    )

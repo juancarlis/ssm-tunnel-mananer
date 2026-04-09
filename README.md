@@ -38,7 +38,7 @@ If you want `ssm-tunnel` available outside a source checkout, install the packag
 uv tool install ssm-tunnel-manager
 ```
 
-For an upgrade from the package index, use `uv tool install --reinstall ssm-tunnel-manager`.
+For an upgrade from the public GitHub repository, use `uv tool install --reinstall git+https://github.com/juancarlis/ssm-tunnel-mananer.git`.
 
 To remove the supported packaged CLI again, run:
 
@@ -60,13 +60,13 @@ Concretely for this repository:
 curl -fsSL https://raw.githubusercontent.com/juancarlis/ssm-tunnel-mananer/main/scripts/install.sh | sh
 ```
 
-That script stays intentionally thin: it installs the package with `uv tool install` or `uv tool install --reinstall`, then delegates runtime/config bootstrap to `ssm-tunnel install` with the self-install guard enabled.
+That script stays intentionally thin: it installs the package with `uv tool install` or `uv tool install --reinstall`, then delegates runtime/config bootstrap to `ssm-tunnel upgrade` with the self-install guard enabled.
 
-Until `ssm-tunnel-manager` is published to a package registry, set `SSM_TUNNEL_PACKAGE_SPEC` to the GitHub repository URL before invoking the installer:
+Use this remote bootstrap flow:
 
 ```bash
-SSM_TUNNEL_PACKAGE_SPEC="git+https://github.com/juancarlis/ssm-tunnel-mananer" \
-  curl -fsSL https://raw.githubusercontent.com/juancarlis/ssm-tunnel-mananer/main/scripts/install.sh | sh
+export SSM_TUNNEL_PACKAGE_SPEC="git+https://github.com/juancarlis/ssm-tunnel-mananer.git"
+curl -fsSL https://raw.githubusercontent.com/juancarlis/ssm-tunnel-mananer/main/scripts/install.sh | sh
 ```
 
 Use the raw `raw.githubusercontent.com` script URL, not the GitHub page URL, and use the repository URL for `SSM_TUNNEL_PACKAGE_SPEC`.
@@ -75,15 +75,15 @@ Use the raw `raw.githubusercontent.com` script URL, not the GitHub page URL, and
 
 By default the CLI reads `~/.local/share/ssm-tunnels/config/tunnels.yaml`. You can override that with `--config /path/to/tunnels.yaml`.
 
-From a repo checkout, `uv run ssm-tunnel install` now detects that checkout context and runs the reinstall step for you before it bootstraps runtime/config state. When you are already running from the globally installed command, `install` skips the reinstall step and stays a bootstrap check.
+`uv run ssm-tunnel upgrade` updates the packaged CLI from the public GitHub repository, creates the runtime directories under `~/.local/share/ssm-tunnels/`, and writes the packaged generic template config only if it does not already exist.
 
 Seed or re-check the user-managed config path with:
 
 ```bash
-uv run ssm-tunnel install
+uv run ssm-tunnel upgrade
 ```
 
-`install` creates the runtime directories under `~/.local/share/ssm-tunnels/` and writes the packaged generic template config only if it does not already exist. Re-running `install` is safe: it preserves any existing user config instead of overwriting it.
+Re-running `upgrade` is safe: it preserves any existing user config instead of overwriting it. The self-install loop guard `SSM_TUNNEL_SKIP_SELF_INSTALL=1` still skips the `uv tool install --reinstall ...` step so installer bootstrap does not recurse forever.
 
 Expected shape:
 
@@ -128,10 +128,10 @@ Show the default status summary for all configured tunnels:
 uv run ssm-tunnel
 ```
 
-Bootstrap the user-managed config path if you have not done so yet:
+Upgrade the packaged CLI and bootstrap the user-managed config path if you have not done so yet:
 
 ```bash
-uv run ssm-tunnel install
+uv run ssm-tunnel upgrade
 ```
 
 Remove the supported packaged CLI without deleting config, logs, or runtime state:
@@ -232,12 +232,12 @@ Notes:
 - `status` also supports `--running`, `--stopped`, `--enabled`, and `--disabled` for the global summary view
 - `status <name>` rejects filter flags so the single-tunnel detail contract stays unambiguous
 - `login` runs `aws sso login --profile <defaults.aws.profile>` in the foreground, so the normal AWS CLI browser or device-code flow stays interactive in your terminal
-- `uv run ssm-tunnel install` from a repo checkout reinstalls the CLI globally with `uv tool install --reinstall /path/to/ssm-tunnel-manager` before bootstrapping runtime/config state
-- When already running from the globally installed command, `install` skips the reinstall step and just re-checks runtime/config state
+- `uv run ssm-tunnel upgrade` updates the packaged CLI with `uv tool install --reinstall git+https://github.com/juancarlis/ssm-tunnel-mananer.git` before bootstrapping runtime/config state
+- When `SSM_TUNNEL_SKIP_SELF_INSTALL=1` is already set, `upgrade` skips the reinstall step and just re-checks runtime/config state
 - `uninstall` runs `uv tool uninstall ssm-tunnel-manager` for the supported packaged install path and leaves `~/.local/share/ssm-tunnels/` untouched
-- `install` seeds only the packaged generic template; it never copies the repo's real config into your user-managed path
-- `scripts/install.sh` is the `curl ... | sh` entry point and defaults to installing the published package from the configured Python package index as `ssm-tunnel-manager`
-- `scripts/install.sh` uses `uv tool install` for first install, `uv tool install --reinstall` for upgrades, and then runs `ssm-tunnel install` with `SSM_TUNNEL_SKIP_SELF_INSTALL=1`
+- `upgrade` seeds only the packaged generic template; it never copies the repo's real config into your user-managed path
+- `scripts/install.sh` is the `curl ... | sh` entry point and defaults to installing from `git+https://github.com/juancarlis/ssm-tunnel-mananer.git`
+- `scripts/install.sh` uses `uv tool install` for first install, `uv tool install --reinstall` for upgrades, and then runs `ssm-tunnel upgrade` with `SSM_TUNNEL_SKIP_SELF_INSTALL=1`
 - `start`, `stop`, and `restart` accept multiple tunnel names in one command
 - `--all` is supported for `start`, `stop`, and `restart`
 - `start` marks the selected tunnels as desired `running`; `stop` marks them as desired `stopped`
@@ -247,7 +247,7 @@ Notes:
 - `help` prints the command usage without loading tunnel config first
 - `tui` keeps the interactive flow action first, then prompts for action-specific tunnel selection
 - `tui` is powered by `fzf`, so action and tunnel selection use normal `fzf` behavior: arrow keys move through the list, typing filters matches, and `Enter` confirms the current selection
-- In `tui`, `login` is an action-only flow that dispatches the same shared `ssm-tunnel login` path without any tunnel prompt, `uninstall` is an action-only flow that dispatches the shared `ssm-tunnel uninstall` path, `status` offers `all` or one tunnel, `stop` also exposes an explicit `all` choice alongside multi-select tunnel picking, `logs` remains single-tunnel only, `help` and `quit` are action-only flows, and lifecycle actions use `Tab` to mark multiple tunnels before confirming with `Enter`
+- In `tui`, `upgrade`, `login`, and `uninstall` are action-only flows that dispatch the shared CLI paths without any tunnel prompt, `status` offers `all` or one tunnel, `stop` also exposes an explicit `all` choice alongside multi-select tunnel picking, `logs` remains single-tunnel only, `help` and `quit` are action-only flows, and lifecycle actions use `Tab` to mark multiple tunnels before confirming with `Enter`
 
 Using a non-default config file:
 
@@ -271,7 +271,7 @@ uv run python -m build
 
 The MVP stores runtime data under `~/.local/share/ssm-tunnels/`:
 
-- `config/tunnels.yaml`: user-managed tunnel definitions seeded by `install` from a packaged generic template
+- `config/tunnels.yaml`: user-managed tunnel definitions seeded by `upgrade` from a packaged generic template
 - `logs/<tunnel>.log`: tunnel log output and lifecycle messages
 - `run/state.json`: persisted runtime state for all tunnels
 

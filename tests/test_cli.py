@@ -231,9 +231,9 @@ def test_cli_help_command_prints_usage(capsys):
     out = capsys.readouterr().out
     assert "usage: ssm-tunnel" in out
     assert "help" in out
+    assert "upgrade" in out
     assert "uninstall" in out
     assert "login" in out
-    assert "Bootstrap config and self-install from a checkout" in out
     assert "tui" in out
 
 
@@ -705,6 +705,47 @@ def test_cli_tui_uninstall_selection_dispatches_without_loading_config(
     ]
 
 
+def test_cli_tui_upgrade_selection_dispatches_without_loading_config(
+    monkeypatch, capsys
+):
+    calls = []
+
+    monkeypatch.setattr(
+        "ssm_tunnel_manager.tui.launch",
+        lambda config, **kwargs: argparse.Namespace(command="upgrade"),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "load_config",
+        lambda path=None: (_ for _ in ()).throw(
+            AssertionError("load_config should not run")
+        ),
+        raising=False,
+    )
+
+    def fake_run(command, check, capture_output, text, env):
+        calls.append((command, check, capture_output, text, env))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run, raising=False)
+
+    assert main(["--config", "/does/not/exist.yaml", "tui"]) == 0
+
+    out = capsys.readouterr().out
+    assert (
+        "Upgraded packaged CLI from: git+https://github.com/juancarlis/ssm-tunnel-mananer.git"
+        in out
+    )
+    assert calls[0][0] == [
+        "uv",
+        "tool",
+        "install",
+        "--reinstall",
+        "git+https://github.com/juancarlis/ssm-tunnel-mananer.git",
+    ]
+    assert calls[0][4]["SSM_TUNNEL_SKIP_SELF_INSTALL"] == "1"
+
+
 def test_cli_tui_loads_config_after_selecting_tunnel_backed_action(
     cli_env, monkeypatch, capsys
 ):
@@ -875,7 +916,7 @@ def test_cli_status_rejects_filter_flags_with_named_tunnel(cli_env, capsys):
     )
 
 
-def test_cli_install_seeds_template_once_and_preserves_existing_config(
+def test_cli_upgrade_seeds_template_once_and_preserves_existing_config(
     tmp_path, monkeypatch, capsys
 ):
     runtime_root = tmp_path / "runtime"
@@ -883,7 +924,9 @@ def test_cli_install_seeds_template_once_and_preserves_existing_config(
         "ssm_tunnel_manager.paths.default_data_dir", lambda: runtime_root
     )
 
-    assert main(["install"]) == 0
+    monkeypatch.setenv("SSM_TUNNEL_SKIP_SELF_INSTALL", "1")
+
+    assert main(["upgrade"]) == 0
     out = capsys.readouterr().out
     config_path = runtime_root / "config" / "tunnels.yaml"
 
@@ -897,25 +940,20 @@ def test_cli_install_seeds_template_once_and_preserves_existing_config(
 
     config_path.write_text("version: 1\ntunnels: []\n", encoding="utf-8")
 
-    assert main(["install"]) == 0
+    assert main(["upgrade"]) == 0
     out = capsys.readouterr().out
     assert f"Preserved existing config: {config_path}" in out
     assert config_path.read_text(encoding="utf-8") == "version: 1\ntunnels: []\n"
 
 
-def test_cli_install_reinstalls_global_command_from_checkout_before_bootstrap(
+def test_cli_upgrade_reinstalls_packaged_command_before_bootstrap(
     tmp_path, monkeypatch, capsys
 ):
     runtime_root = tmp_path / "runtime"
-    checkout_root = tmp_path / "checkout"
-    checkout_root.mkdir()
     calls = []
 
     monkeypatch.setattr(
         "ssm_tunnel_manager.paths.default_data_dir", lambda: runtime_root
-    )
-    monkeypatch.setattr(
-        cli_module, "detect_checkout_install_root", lambda: checkout_root, raising=False
     )
 
     def fake_run(command, check, capture_output, text, env):
@@ -924,13 +962,19 @@ def test_cli_install_reinstalls_global_command_from_checkout_before_bootstrap(
 
     monkeypatch.setattr(cli_module.subprocess, "run", fake_run, raising=False)
 
-    assert main(["install"]) == 0
+    assert main(["upgrade"]) == 0
 
     out = capsys.readouterr().out
     config_path = runtime_root / "config" / "tunnels.yaml"
     assert len(calls) == 1
     command, check, capture_output, text, env = calls[0]
-    assert command == ["uv", "tool", "install", "--reinstall", str(checkout_root)]
+    assert command == [
+        "uv",
+        "tool",
+        "install",
+        "--reinstall",
+        "git+https://github.com/juancarlis/ssm-tunnel-mananer.git",
+    ]
     assert check is True
     assert capture_output is True
     assert text is True
@@ -939,13 +983,14 @@ def test_cli_install_reinstalls_global_command_from_checkout_before_bootstrap(
         if key == "SSM_TUNNEL_SKIP_SELF_INSTALL":
             continue
         assert env[key] == value
-    assert f"Installed or upgraded global command from checkout: {checkout_root}" in out
+    assert (
+        "Upgraded packaged CLI from: git+https://github.com/juancarlis/ssm-tunnel-mananer.git"
+        in out
+    )
     assert f"Seeded template config: {config_path}" in out
 
 
-def test_cli_install_skips_checkout_reinstall_when_loop_guard_is_set(
-    tmp_path, monkeypatch, capsys
-):
+def test_cli_upgrade_honors_self_install_loop_guard(tmp_path, monkeypatch, capsys):
     runtime_root = tmp_path / "runtime"
     config_path = runtime_root / "config" / "tunnels.yaml"
     calls = []
@@ -963,7 +1008,7 @@ def test_cli_install_skips_checkout_reinstall_when_loop_guard_is_set(
 
     monkeypatch.setattr(cli_module.subprocess, "run", fake_run, raising=False)
 
-    assert main(["install"]) == 0
+    assert main(["upgrade"]) == 0
 
     out = capsys.readouterr().out
     assert calls == []
@@ -972,7 +1017,7 @@ def test_cli_install_skips_checkout_reinstall_when_loop_guard_is_set(
     assert config_path.read_text(encoding="utf-8") == "version: 1\ntunnels: []\n"
 
 
-def test_cli_install_seeded_default_config_is_usable(tmp_path, monkeypatch, capsys):
+def test_cli_upgrade_seeded_default_config_is_usable(tmp_path, monkeypatch, capsys):
     runtime_root = tmp_path / "runtime"
     monkeypatch.setattr(
         "ssm_tunnel_manager.paths.default_data_dir", lambda: runtime_root
@@ -981,11 +1026,45 @@ def test_cli_install_seeded_default_config_is_usable(tmp_path, monkeypatch, caps
         "ssm_tunnel_manager.cli.check_dependencies", lambda backend_name: []
     )
 
-    assert main(["install"]) == 0
+    monkeypatch.setenv("SSM_TUNNEL_SKIP_SELF_INSTALL", "1")
+
+    assert main(["upgrade"]) == 0
     capsys.readouterr()
 
     assert main(["status"]) == 0
     assert "No configured tunnels." in capsys.readouterr().out
+
+
+def test_cli_upgrade_reports_missing_uv(monkeypatch, capsys):
+    def fake_run(command, check, capture_output, text, env):
+        raise FileNotFoundError("uv")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run, raising=False)
+
+    assert main(["upgrade"]) == 4
+
+    assert (
+        capsys.readouterr().err
+        == "Upgrade error: 'uv' is required in PATH to upgrade ssm-tunnel-manager.\n"
+    )
+
+
+def test_cli_upgrade_reports_uv_subprocess_failure(monkeypatch, capsys):
+    def fake_run(command, check, capture_output, text, env):
+        raise subprocess.CalledProcessError(
+            9,
+            command,
+            stderr="package reinstall failed",
+        )
+
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run, raising=False)
+
+    assert main(["upgrade"]) == 5
+
+    assert (
+        "Upgrade error: uv tool install --reinstall git+https://github.com/juancarlis/ssm-tunnel-mananer.git failed: package reinstall failed"
+        in capsys.readouterr().err
+    )
 
 
 def test_cli_summary_table_aligns_variable_width_values(tmp_path, monkeypatch, capsys):

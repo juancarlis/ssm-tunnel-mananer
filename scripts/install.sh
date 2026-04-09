@@ -2,7 +2,7 @@
 
 set -eu
 
-PACKAGE_SPEC=${SSM_TUNNEL_PACKAGE_SPEC:-ssm-tunnel-manager}
+PACKAGE_SPEC=${SSM_TUNNEL_PACKAGE_SPEC:-git+https://github.com/juancarlis/ssm-tunnel-mananer.git}
 TMP_LOG=""
 
 cleanup() {
@@ -75,4 +75,4 @@ if ! command -v ssm-tunnel >/dev/null 2>&1; then
     exit 1
 fi
 
-run_step "ssm-tunnel install" env SSM_TUNNEL_SKIP_SELF_INSTALL=1 ssm-tunnel install
+run_step "ssm-tunnel upgrade" env SSM_TUNNEL_SKIP_SELF_INSTALL=1 ssm-tunnel upgrade
