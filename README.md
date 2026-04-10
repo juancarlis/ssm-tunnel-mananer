@@ -247,9 +247,10 @@ Notes:
 - `help` prints the command usage without loading tunnel config first
 - `tui` keeps the interactive flow action first, then prompts for action-specific tunnel selection
 - `tui` is powered by `prompt_toolkit` as an in-process selector, so action and tunnel selection stay inside the Python process
-- In `tui`, arrow keys move through the list, `j` / `k` also move, `Enter` confirms the current selection, and `Esc` cancels cleanly (`Ctrl-C` also cancels)
+- In `tui`, arrow keys move through the list, `j` / `k` also move, `Enter` confirms the current selection, `q` cancels cleanly, and `Ctrl-C` still cancels
+- In nested `tui` screens, `Esc` goes back to the previous screen instead of exiting the whole flow; from the top-level action screen it still exits cleanly
 - In multi-select flows, `Space` toggles checkbox-style selections before `Enter` confirms; if nothing is checked yet, `Enter` still confirms the currently highlighted tunnel
-- In `tui`, `upgrade`, `login`, and `uninstall` are action-only flows that dispatch the shared CLI paths without any tunnel prompt, `status` offers `all` or one tunnel, `start` / `stop` / `restart` expose an explicit `all` choice alongside multi-select tunnel picking, `logs` remains single-tunnel only, and `help` / `quit` are action-only flows
+- In `tui`, `upgrade`, `login`, and `uninstall` are action-only flows that dispatch the shared CLI paths without any tunnel prompt, `status` offers `all` or one tunnel, `start` / `stop` / `restart` expose an explicit `all` choice alongside real multi-select tunnel picking plus a compact running-now summary derived from the same runtime state as `status --running`, `logs` remains single-tunnel only, and `help` / `quit` are action-only flows
 
 Using a non-default config file:
 

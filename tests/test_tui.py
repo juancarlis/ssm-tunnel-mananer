@@ -10,13 +10,16 @@ from ssm_tunnel_manager.models import (
     AwsSettings,
     DefaultsConfig,
     EffectiveTunnel,
+    RuntimeStatus,
 )
 from ssm_tunnel_manager.tui import (
+    SelectionBack,
     SelectionCancelled,
     Selector,
     SelectorError,
     SelectorOption,
     _SelectionState,
+    _running_tunnel_summary_lines,
     launch,
 )
 
@@ -53,16 +56,48 @@ class FakeSelector:
         self._responses = iter(responses)
         self.calls = []
 
-    def select_one(self, options, *, prompt: str, header: str):
-        self.calls.append(("one", [option.label for option in options], prompt, header))
+    def select_one(
+        self,
+        options,
+        *,
+        prompt: str,
+        header: str,
+        allow_back: bool = False,
+        context_lines=(),
+    ):
+        self.calls.append(
+            (
+                "one",
+                [option.label for option in options],
+                prompt,
+                header,
+                allow_back,
+                list(context_lines),
+            )
+        )
         response = next(self._responses)
         if isinstance(response, Exception):
             raise response
         return response
 
-    def select_many(self, options, *, prompt: str, header: str):
+    def select_many(
+        self,
+        options,
+        *,
+        prompt: str,
+        header: str,
+        allow_back: bool = False,
+        context_lines=(),
+    ):
         self.calls.append(
-            ("many", [option.label for option in options], prompt, header)
+            (
+                "many",
+                [option.label for option in options],
+                prompt,
+                header,
+                allow_back,
+                list(context_lines),
+            )
         )
         response = next(self._responses)
         if isinstance(response, Exception):
@@ -93,6 +128,8 @@ def test_tui_prompts_for_action_first_and_quit_exits_cleanly():
             ],
             "action > ",
             "Choose an action.",
+            False,
+            [],
         )
     ]
 
@@ -121,12 +158,16 @@ def test_tui_status_supports_all_tunnels_after_action_selection():
             ],
             "action > ",
             "Choose an action.",
+            False,
+            [],
         ),
         (
             "one",
             ["all", "mysql", "redis"],
             "status > ",
             "Choose a tunnel or all.",
+            True,
+            [],
         ),
     ]
 
@@ -144,6 +185,8 @@ def test_tui_logs_keeps_single_tunnel_selection():
         ["mysql", "redis"],
         "logs > ",
         "Choose one tunnel.",
+        True,
+        [],
     )
 
 
@@ -160,6 +203,11 @@ def test_tui_start_offers_explicit_all_option_and_maps_to_cli_all_flag():
         ["all", "mysql", "redis", "admin"],
         "start > ",
         "Choose one or more tunnels to start, or select all.",
+        True,
+        [
+            "Running now",
+            "• none",
+        ],
     )
 
 
@@ -176,6 +224,11 @@ def test_tui_start_keeps_multi_select_for_specific_tunnels():
         ["all", "mysql", "redis", "admin"],
         "start > ",
         "Choose one or more tunnels to start, or select all.",
+        True,
+        [
+            "Running now",
+            "• none",
+        ],
     )
 
 
@@ -192,6 +245,11 @@ def test_tui_stop_offers_explicit_all_option_and_maps_to_cli_all_flag():
         ["all", "mysql", "redis"],
         "stop > ",
         "Choose one or more tunnels to stop, or select all.",
+        True,
+        [
+            "Running now",
+            "• none",
+        ],
     )
 
 
@@ -208,6 +266,11 @@ def test_tui_restart_offers_explicit_all_option_and_maps_to_cli_all_flag():
         ["all", "mysql", "redis"],
         "restart > ",
         "Choose one or more tunnels to restart, or select all.",
+        True,
+        [
+            "Running now",
+            "• none",
+        ],
     )
 
 
@@ -261,6 +324,71 @@ def test_tui_cancellation_exits_without_selection():
     selector = FakeSelector([SelectionCancelled()])
 
     assert launch(build_config("mysql"), selector=selector) is None
+
+
+def test_tui_escape_from_nested_screen_goes_back_to_action_selection():
+    selector = FakeSelector(["status", SelectionBack(), "logs", "mysql"])
+
+    selection = launch(build_config("mysql", "redis"), selector=selector)
+
+    assert selection.command == "logs"
+    assert selection.name == "mysql"
+    assert selector.calls == [
+        (
+            "one",
+            [
+                "status",
+                "upgrade",
+                "login",
+                "start",
+                "stop",
+                "restart",
+                "logs",
+                "help",
+                "uninstall",
+                "quit",
+            ],
+            "action > ",
+            "Choose an action.",
+            False,
+            [],
+        ),
+        (
+            "one",
+            ["all", "mysql", "redis"],
+            "status > ",
+            "Choose a tunnel or all.",
+            True,
+            [],
+        ),
+        (
+            "one",
+            [
+                "status",
+                "upgrade",
+                "login",
+                "start",
+                "stop",
+                "restart",
+                "logs",
+                "help",
+                "uninstall",
+                "quit",
+            ],
+            "action > ",
+            "Choose an action.",
+            False,
+            [],
+        ),
+        (
+            "one",
+            ["mysql", "redis"],
+            "logs > ",
+            "Choose one tunnel.",
+            True,
+            [],
+        ),
+    ]
 
 
 def test_tui_multi_select_space_keeps_checkbox_state_in_option_order():
@@ -330,6 +458,13 @@ def test_tui_instructions_include_q_cancel_shortcut():
     assert multi.render_lines(prompt="start > ", header="Choose tunnels.")[-1] == (
         "↑/↓ or j/k move • space toggles • enter confirms • q/esc/c-c cancels"
     )
+    assert multi.render_lines(
+        prompt="start > ",
+        header="Choose tunnels.",
+        allow_back=True,
+    )[-1] == (
+        "↑/↓ or j/k move • space toggles • enter confirms • esc goes back • q/c-c cancels"
+    )
 
 
 def test_tui_render_lines_include_title_and_tunnel_motif():
@@ -347,6 +482,23 @@ def test_tui_render_lines_include_title_and_tunnel_motif():
         "action >",
         "Choose an action.",
     ]
+
+
+def test_tui_render_lines_include_running_summary_context():
+    state = _SelectionState(
+        options=[SelectorOption("mysql", "mysql")],
+        multi=True,
+    )
+
+    lines = state.render_lines(
+        prompt="start > ",
+        header="Choose one or more tunnels to start, or select all.",
+        context_lines=["Running now", "• mysql  localhost:13306 → mysql.internal:3306"],
+        allow_back=True,
+    )
+
+    assert "Running now" in lines
+    assert "• mysql  localhost:13306 → mysql.internal:3306" in lines
 
 
 def test_tui_reports_missing_prompt_toolkit_dependency(monkeypatch):
@@ -372,11 +524,20 @@ def test_tui_selector_runs_in_process_application(monkeypatch):
         def run(self):
             return ["redis", "mysql"]
 
-    def fake_builder(state, *, prompt: str, header: str):
+    def fake_builder(
+        state,
+        *,
+        prompt: str,
+        header: str,
+        allow_back: bool = False,
+        context_lines=(),
+    ):
         recorded["prompt"] = prompt
         recorded["header"] = header
         recorded["multi"] = state.multi
         recorded["options"] = [option.label for option in state.options]
+        recorded["allow_back"] = allow_back
+        recorded["context_lines"] = list(context_lines)
         return FakeApplication()
 
     selector = Selector()
@@ -397,7 +558,30 @@ def test_tui_selector_runs_in_process_application(monkeypatch):
         "header": "Choose one or more tunnels to start.",
         "multi": True,
         "options": ["mysql", "redis"],
+        "allow_back": False,
+        "context_lines": [],
     }
+
+
+def test_tui_running_summary_uses_current_runtime_state(monkeypatch):
+    config = build_config("mysql", "redis")
+
+    monkeypatch.setattr("ssm_tunnel_manager.tui.load_runtime_state", lambda: {})
+
+    def fake_resolve(config_arg, tunnel, runtime_states):
+        assert config_arg is config
+        assert runtime_states == {}
+        status = (
+            RuntimeStatus.RUNNING if tunnel.name == "mysql" else RuntimeStatus.STOPPED
+        )
+        return status, None
+
+    monkeypatch.setattr("ssm_tunnel_manager.tui._resolve_tunnel_status", fake_resolve)
+
+    assert _running_tunnel_summary_lines(config) == [
+        "Running now",
+        "• mysql  localhost:13001 → mysql.internal:3306",
+    ]
 
 
 def test_tui_selector_uses_full_screen_app_and_q_cancel_binding(monkeypatch):
@@ -483,10 +667,69 @@ def test_tui_selector_uses_full_screen_app_and_q_cancel_binding(monkeypatch):
     assert app.mouse_support is False
     assert app.style["title"] == "bold ansicyan"
     assert (("q",), "_cancel") in app.key_bindings.bindings
-    assert (("escape",), "_cancel") in app.key_bindings.bindings
+    assert (("escape",), "_cancel_escape") in app.key_bindings.bindings
     assert (("c-c",), "_cancel") in app.key_bindings.bindings
 
     control = recorded["hsplit_children"][0].content
     fragments = control.text()
     assert ("class:title", "ssm tunnel manager") in fragments
     assert ("class:motif", "◎────◎") in fragments
+
+
+def test_tui_selector_uses_escape_for_back_on_nested_screens(monkeypatch):
+    class FakeApplication:
+        def __init__(self, **kwargs):
+            self.key_bindings = kwargs["key_bindings"]
+
+    class FakeKeyBindings:
+        def __init__(self):
+            self.bindings = []
+
+        def add(self, *keys):
+            def decorator(handler):
+                self.bindings.append((keys, handler.__name__))
+                return handler
+
+            return decorator
+
+    prompt_toolkit_module = types.ModuleType("prompt_toolkit")
+    application_module = types.ModuleType("prompt_toolkit.application")
+    application_module.Application = FakeApplication
+    key_binding_module = types.ModuleType("prompt_toolkit.key_binding")
+    key_binding_module.KeyBindings = FakeKeyBindings
+    layout_module = types.ModuleType("prompt_toolkit.layout")
+    layout_module.HSplit = lambda children: ("hsplit", children)
+    layout_module.Layout = lambda container: ("layout", container)
+    layout_module.Window = lambda **kwargs: types.SimpleNamespace(**kwargs)
+    controls_module = types.ModuleType("prompt_toolkit.layout.controls")
+    controls_module.FormattedTextControl = lambda text: types.SimpleNamespace(text=text)
+    styles_module = types.ModuleType("prompt_toolkit.styles")
+
+    class FakeStyle:
+        @classmethod
+        def from_dict(cls, style_map):
+            return style_map
+
+    styles_module.Style = FakeStyle
+
+    monkeypatch.setitem(sys.modules, "prompt_toolkit", prompt_toolkit_module)
+    monkeypatch.setitem(sys.modules, "prompt_toolkit.application", application_module)
+    monkeypatch.setitem(sys.modules, "prompt_toolkit.key_binding", key_binding_module)
+    monkeypatch.setitem(sys.modules, "prompt_toolkit.layout", layout_module)
+    monkeypatch.setitem(sys.modules, "prompt_toolkit.layout.controls", controls_module)
+    monkeypatch.setitem(sys.modules, "prompt_toolkit.styles", styles_module)
+
+    selector = Selector()
+    app = selector._build_application(
+        _SelectionState(
+            options=[SelectorOption("mysql", "mysql")],
+            multi=True,
+        ),
+        prompt="start > ",
+        header="Choose one or more tunnels to start, or select all.",
+        allow_back=True,
+        context_lines=["Running now", "• mysql  localhost:13306 → mysql.internal:3306"],
+    )
+
+    assert (("escape",), "_go_back") in app.key_bindings.bindings
+    assert (("q",), "_cancel") in app.key_bindings.bindings

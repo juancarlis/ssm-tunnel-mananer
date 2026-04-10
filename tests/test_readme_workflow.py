@@ -131,10 +131,15 @@ def test_readme_documents_help_and_tui_workflow():
     assert "arrow keys move through the list" in readme
     assert "`j` / `k`" in readme
     assert "`Space` toggles" in readme
-    assert "`Esc` cancels" in readme
+    assert "`q` cancels cleanly" in readme
+    assert "`Esc` goes back to the previous screen" in readme
     assert "`upgrade`, `login`, and `uninstall` are action-only flows" in readme
     assert "`logs` remains single-tunnel only" in readme
     assert "`status` offers `all`" in readme
+    assert (
+        "running-now summary derived from the same runtime state as `status --running`"
+        in readme
+    )
 
 
 def test_readme_documents_explicit_remote_install_flow():

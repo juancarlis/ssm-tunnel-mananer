@@ -5,7 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ssm_tunnel_manager.cli import _resolve_tunnel_status
 from ssm_tunnel_manager.models import AppConfig
+from ssm_tunnel_manager.models import RuntimeStatus
+from ssm_tunnel_manager.state import load_runtime_state
 
 
 _TITLE = "ssm tunnel manager"
@@ -18,6 +21,10 @@ class SelectorError(RuntimeError):
 
 class SelectionCancelled(RuntimeError):
     """Raised when the user exits the selector without a choice."""
+
+
+class SelectionBack(RuntimeError):
+    """Raised when the user goes back to the previous selector screen."""
 
 
 @dataclass(frozen=True)
@@ -77,8 +84,17 @@ class _SelectionState:
             if option.value in self.selected_values
         ]
 
-    def render_lines(self, *, prompt: str, header: str) -> list[str]:
+    def render_lines(
+        self,
+        *,
+        prompt: str,
+        header: str,
+        context_lines: Sequence[str] = (),
+        allow_back: bool = False,
+    ) -> list[str]:
         lines = [_TITLE, _MOTIF, "", prompt.rstrip(), header, ""]
+        if context_lines:
+            lines.extend([*context_lines, ""])
         for index, option in enumerate(self.options):
             cursor_marker = "›" if index == self.cursor else " "
             if self.multi and self.selected_values is not None:
@@ -91,26 +107,39 @@ class _SelectionState:
         lines.extend(
             [
                 "",
-                self._instructions(),
+                self._instructions(allow_back=allow_back),
             ]
         )
         return lines
 
-    def render_fragments(self, *, prompt: str, header: str) -> list[tuple[str, str]]:
+    def render_fragments(
+        self,
+        *,
+        prompt: str,
+        header: str,
+        context_lines: Sequence[str] = (),
+        allow_back: bool = False,
+    ) -> list[tuple[str, str]]:
         fragments: list[tuple[str, str]] = []
-        for line in self.render_lines(prompt=prompt, header=header):
+        for line in self.render_lines(
+            prompt=prompt,
+            header=header,
+            context_lines=context_lines,
+            allow_back=allow_back,
+        ):
             fragments.extend(self._line_fragments(line))
             fragments.append(("", "\n"))
         if fragments:
             fragments.pop()
         return fragments
 
-    def _instructions(self) -> str:
+    def _instructions(self, *, allow_back: bool) -> str:
+        exit_hint = (
+            "esc goes back • q/c-c cancels" if allow_back else "q/esc/c-c cancels"
+        )
         if self.multi:
-            return (
-                "↑/↓ or j/k move • space toggles • enter confirms • q/esc/c-c cancels"
-            )
-        return "↑/↓ or j/k move • enter confirms • q/esc/c-c cancels"
+            return f"↑/↓ or j/k move • space toggles • enter confirms • {exit_hint}"
+        return f"↑/↓ or j/k move • enter confirms • {exit_hint}"
 
     def _line_fragments(self, line: str) -> list[tuple[str, str]]:
         if line == _TITLE:
@@ -119,7 +148,7 @@ class _SelectionState:
             return [("class:motif", line)]
         if line.endswith(">"):
             return [("class:prompt", line)]
-        if line == self._instructions():
+        if line.startswith("↑/↓ or j/k move"):
             return [("class:instructions", line)]
         if line.startswith("› "):
             return [("class:cursor", "›"), ("", line[1:])]
@@ -156,65 +185,82 @@ def launch(
     active_selector = selector or Selector()
 
     try:
-        selected_action = action or _select_action(active_selector)
-        if selected_action == "quit":
-            return None
-        if selected_action == "help":
-            return argparse.Namespace(command="help")
-        if selected_action == "upgrade":
-            return argparse.Namespace(command="upgrade")
-        if selected_action == "login":
-            return argparse.Namespace(command="login")
-        if selected_action == "uninstall":
-            return argparse.Namespace(command="uninstall")
+        selected_action = action
+        while True:
+            if selected_action is None:
+                selected_action = _select_action(active_selector)
+            if selected_action == "quit":
+                return None
+            if selected_action == "help":
+                return argparse.Namespace(command="help")
+            if selected_action == "upgrade":
+                return argparse.Namespace(command="upgrade")
+            if selected_action == "login":
+                return argparse.Namespace(command="login")
+            if selected_action == "uninstall":
+                return argparse.Namespace(command="uninstall")
 
-        if config is None:
-            return argparse.Namespace(command="tui", action=selected_action)
+            if config is None:
+                return argparse.Namespace(command="tui", action=selected_action)
 
-        tunnel_names = [tunnel.name for tunnel in config.effective_tunnels]
-        if selected_action == "status":
-            selection = active_selector.select_one(
-                [
-                    _ALL_TUNNELS_OPTION,
-                    *[SelectorOption(name, name) for name in tunnel_names],
-                ],
-                prompt="status > ",
-                header="Choose a tunnel or all.",
-            )
-            return argparse.Namespace(command="status", name=selection)
+            tunnel_names = [tunnel.name for tunnel in config.effective_tunnels]
+            try:
+                if selected_action == "status":
+                    selection = active_selector.select_one(
+                        [
+                            _ALL_TUNNELS_OPTION,
+                            *[SelectorOption(name, name) for name in tunnel_names],
+                        ],
+                        prompt="status > ",
+                        header="Choose a tunnel or all.",
+                        allow_back=True,
+                    )
+                    return argparse.Namespace(command="status", name=selection)
 
-        if not tunnel_names:
-            raise SelectorError(
-                f"The '{selected_action}' action requires at least one configured tunnel."
-            )
+                if not tunnel_names:
+                    raise SelectorError(
+                        f"The '{selected_action}' action requires at least one configured tunnel."
+                    )
 
-        if selected_action == "logs":
-            name = active_selector.select_one(
-                [SelectorOption(name, name) for name in tunnel_names],
-                prompt="logs > ",
-                header="Choose one tunnel.",
-            )
-            return argparse.Namespace(command="logs", name=name)
+                if selected_action == "logs":
+                    name = active_selector.select_one(
+                        [SelectorOption(name, name) for name in tunnel_names],
+                        prompt="logs > ",
+                        header="Choose one tunnel.",
+                        allow_back=True,
+                    )
+                    return argparse.Namespace(command="logs", name=name)
 
-        if selected_action in {"start", "stop", "restart"}:
-            names = active_selector.select_many(
-                [
-                    _multi_all_option(),
-                    *[SelectorOption(name, name) for name in tunnel_names],
-                ],
-                prompt=f"{selected_action} > ",
-                header=f"Choose one or more tunnels to {selected_action}, or select all.",
-            )
-            if _MULTI_ALL_SENTINEL in names:
-                return argparse.Namespace(command=selected_action, names=[], all=True)
-            return argparse.Namespace(command=selected_action, names=names, all=False)
+                if selected_action in {"start", "stop", "restart"}:
+                    names = active_selector.select_many(
+                        [
+                            _multi_all_option(),
+                            *[SelectorOption(name, name) for name in tunnel_names],
+                        ],
+                        prompt=f"{selected_action} > ",
+                        header=f"Choose one or more tunnels to {selected_action}, or select all.",
+                        allow_back=True,
+                        context_lines=_running_tunnel_summary_lines(config),
+                    )
+                    if _MULTI_ALL_SENTINEL in names:
+                        return argparse.Namespace(
+                            command=selected_action, names=[], all=True
+                        )
+                    return argparse.Namespace(
+                        command=selected_action, names=names, all=False
+                    )
 
-        names = active_selector.select_many(
-            [SelectorOption(name, name) for name in tunnel_names],
-            prompt=f"{selected_action} > ",
-            header=f"Choose one or more tunnels to {selected_action}.",
-        )
-        return argparse.Namespace(command=selected_action, names=names, all=False)
+                names = active_selector.select_many(
+                    [SelectorOption(name, name) for name in tunnel_names],
+                    prompt=f"{selected_action} > ",
+                    header=f"Choose one or more tunnels to {selected_action}.",
+                    allow_back=True,
+                )
+                return argparse.Namespace(
+                    command=selected_action, names=names, all=False
+                )
+            except SelectionBack:
+                selected_action = None
     except SelectionCancelled:
         return None
 
@@ -226,8 +272,17 @@ class Selector:
         *,
         prompt: str,
         header: str,
+        allow_back: bool = False,
+        context_lines: Sequence[str] = (),
     ) -> str | None:
-        selection = self._run(options, prompt=prompt, header=header, multi=False)
+        selection = self._run(
+            options,
+            prompt=prompt,
+            header=header,
+            multi=False,
+            allow_back=allow_back,
+            context_lines=context_lines,
+        )
         if len(selection) != 1:
             raise SelectorError(
                 "Expected a single selection from the interactive selector."
@@ -240,8 +295,17 @@ class Selector:
         *,
         prompt: str,
         header: str,
+        allow_back: bool = False,
+        context_lines: Sequence[str] = (),
     ) -> list[str]:
-        selection = self._run(options, prompt=prompt, header=header, multi=True)
+        selection = self._run(
+            options,
+            prompt=prompt,
+            header=header,
+            multi=True,
+            allow_back=allow_back,
+            context_lines=context_lines,
+        )
         if not selection:
             raise SelectorError(
                 "Expected at least one selection from the interactive selector."
@@ -255,17 +319,27 @@ class Selector:
         prompt: str,
         header: str,
         multi: bool,
+        allow_back: bool,
+        context_lines: Sequence[str],
     ) -> list[str | None]:
         if not options:
             raise SelectorError("No options available for selection.")
 
         state = _SelectionState(options=options, multi=multi)
-        app = self._build_application(state, prompt=prompt, header=header)
+        app = self._build_application(
+            state,
+            prompt=prompt,
+            header=header,
+            allow_back=allow_back,
+            context_lines=context_lines,
+        )
         try:
             result = app.run()
         except KeyboardInterrupt as exc:
             raise SelectionCancelled() from exc
 
+        if result is _BACK_SENTINEL:
+            raise SelectionBack()
         if result is None:
             raise SelectionCancelled()
         return result
@@ -276,6 +350,8 @@ class Selector:
         *,
         prompt: str,
         header: str,
+        allow_back: bool = False,
+        context_lines: Sequence[str] = (),
     ) -> Any:
         try:
             from prompt_toolkit.application import Application
@@ -307,11 +383,22 @@ class Selector:
         def _submit(event) -> None:
             event.app.exit(result=state.submit())
 
-        @bindings.add("escape")
         @bindings.add("q")
         @bindings.add("c-c")
         def _cancel(event) -> None:
             event.app.exit(result=None)
+
+        if allow_back:
+
+            @bindings.add("escape")
+            def _go_back(event) -> None:
+                event.app.exit(result=_BACK_SENTINEL)
+
+        else:
+
+            @bindings.add("escape")
+            def _cancel_escape(event) -> None:
+                event.app.exit(result=None)
 
         if state.multi:
 
@@ -333,7 +420,12 @@ class Selector:
         )
 
         def _get_text() -> list[tuple[str, str]]:
-            return state.render_fragments(prompt=prompt, header=header)
+            return state.render_fragments(
+                prompt=prompt,
+                header=header,
+                context_lines=context_lines,
+                allow_back=allow_back,
+            )
 
         body = Window(
             content=FormattedTextControl(_get_text),
@@ -362,3 +454,24 @@ def _select_action(selector: Selector) -> str:
 
 def _multi_all_option() -> SelectorOption:
     return SelectorOption("all", _MULTI_ALL_SENTINEL)
+
+
+_BACK_SENTINEL = object()
+
+
+def _running_tunnel_summary_lines(config: AppConfig) -> list[str]:
+    runtime_states = load_runtime_state()
+    running_entries: list[str] = []
+
+    for tunnel in config.effective_tunnels:
+        status, _ = _resolve_tunnel_status(config, tunnel, runtime_states)
+        if status is not RuntimeStatus.RUNNING:
+            continue
+        running_entries.append(
+            f"• {tunnel.name}  localhost:{tunnel.local_port} → {tunnel.remote_host}:{tunnel.remote_port}"
+        )
+
+    if not running_entries:
+        return ["Running now", "• none"]
+
+    return ["Running now", *running_entries]
