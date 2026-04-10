@@ -89,7 +89,7 @@ def launch(
             )
             return argparse.Namespace(command="logs", name=name)
 
-        if selected_action in {"start", "stop"}:
+        if selected_action in {"start", "stop", "restart"}:
             names = active_selector.select_many(
                 [
                     _multi_all_option(),

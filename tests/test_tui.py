@@ -193,6 +193,22 @@ def test_tui_stop_offers_explicit_all_option_and_maps_to_cli_all_flag():
     )
 
 
+def test_tui_restart_offers_explicit_all_option_and_maps_to_cli_all_flag():
+    selector = FakeSelector(["restart", ["all"]])
+
+    selection = launch(build_config("mysql", "redis"), selector=selector)
+
+    assert selection.command == "restart"
+    assert selection.names == []
+    assert selection.all is True
+    assert selector.calls[-1] == (
+        "many",
+        ["all", "mysql", "redis"],
+        "restart > ",
+        "Choose one or more tunnels to restart, or select all.",
+    )
+
+
 def test_tui_help_returns_help_command_without_tunnel_prompt():
     selector = FakeSelector(["help"])
 
