@@ -8,9 +8,9 @@ Archived MVP for managing AWS SSM port-forwarding tunnels from the terminal. It 
 - `tmux`
 - AWS CLI (`aws`)
 - `session-manager-plugin`
-- `fzf` for the interactive `tui` command
+- Python runtime dependencies from this package, including `prompt_toolkit` for the interactive `tui` command
 
-The CLI checks these binaries at runtime. `login` requires `aws`. `start` requires `aws`, `session-manager-plugin`, and `tmux`. `stop` only requires `tmux`. `tui` requires `fzf` and reports a clear runtime error if it is unavailable in `PATH`.
+The CLI checks these binaries at runtime. `login` requires `aws`. `start` requires `aws`, `session-manager-plugin`, and `tmux`. `stop` only requires `tmux`. `tui` runs as an in-process selector, so it no longer depends on an external picker binary in `PATH`.
 
 ## Setup
 
@@ -246,8 +246,10 @@ Notes:
 - `logs` remains single-tunnel only
 - `help` prints the command usage without loading tunnel config first
 - `tui` keeps the interactive flow action first, then prompts for action-specific tunnel selection
-- `tui` is powered by `fzf`, so action and tunnel selection use normal `fzf` behavior: arrow keys move through the list, typing filters matches, and `Enter` confirms the current selection
-- In `tui`, `upgrade`, `login`, and `uninstall` are action-only flows that dispatch the shared CLI paths without any tunnel prompt, `status` offers `all` or one tunnel, `stop` also exposes an explicit `all` choice alongside multi-select tunnel picking, `logs` remains single-tunnel only, `help` and `quit` are action-only flows, and lifecycle actions use `Tab` to mark multiple tunnels before confirming with `Enter`
+- `tui` is powered by `prompt_toolkit` as an in-process selector, so action and tunnel selection stay inside the Python process
+- In `tui`, arrow keys move through the list, `j` / `k` also move, `Enter` confirms the current selection, and `Esc` cancels cleanly (`Ctrl-C` also cancels)
+- In multi-select flows, `Space` toggles checkbox-style selections before `Enter` confirms; if nothing is checked yet, `Enter` still confirms the currently highlighted tunnel
+- In `tui`, `upgrade`, `login`, and `uninstall` are action-only flows that dispatch the shared CLI paths without any tunnel prompt, `status` offers `all` or one tunnel, `start` / `stop` / `restart` expose an explicit `all` choice alongside multi-select tunnel picking, `logs` remains single-tunnel only, and `help` / `quit` are action-only flows
 
 Using a non-default config file:
 
@@ -296,4 +298,4 @@ Current MVP behavior to be aware of:
 
 ## Archived MVP Notes
 
-- This project is intentionally small and terminal-first; the guided `tui` flow shells out to `fzf` instead of carrying a heavier in-process UI framework
+- This project is intentionally small and terminal-first; the guided `tui` flow now uses a lightweight in-process `prompt_toolkit` selector instead of shelling out to an external picker

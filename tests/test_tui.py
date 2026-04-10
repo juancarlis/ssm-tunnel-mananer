@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import subprocess
+import sys
+import types
 
 import pytest
 
@@ -15,6 +16,7 @@ from ssm_tunnel_manager.tui import (
     Selector,
     SelectorError,
     SelectorOption,
+    _SelectionState,
     launch,
 )
 
@@ -261,11 +263,101 @@ def test_tui_cancellation_exits_without_selection():
     assert launch(build_config("mysql"), selector=selector) is None
 
 
-def test_tui_reports_missing_fzf_binary(monkeypatch):
-    selector = Selector()
-    monkeypatch.setattr("ssm_tunnel_manager.tui.shutil.which", lambda _: None)
+def test_tui_multi_select_space_keeps_checkbox_state_in_option_order():
+    state = _SelectionState(
+        options=[
+            SelectorOption("all", "all"),
+            SelectorOption("mysql", "mysql"),
+            SelectorOption("redis", "redis"),
+        ],
+        multi=True,
+    )
 
-    with pytest.raises(SelectorError, match="fzf is required"):
+    state.move(1)
+    state.toggle_current()
+    state.move(1)
+    state.toggle_current()
+
+    assert state.submit() == ["mysql", "redis"]
+
+
+def test_tui_multi_select_all_clears_individual_checkbox_selection():
+    state = _SelectionState(
+        options=[
+            SelectorOption("all", "all"),
+            SelectorOption("mysql", "mysql"),
+            SelectorOption("redis", "redis"),
+        ],
+        multi=True,
+    )
+
+    state.move(1)
+    state.toggle_current()
+    state.move(-1)
+    state.toggle_current()
+
+    assert state.submit() == ["all"]
+
+
+def test_tui_multi_select_enter_defaults_to_current_option_when_nothing_is_checked():
+    state = _SelectionState(
+        options=[
+            SelectorOption("all", "all"),
+            SelectorOption("mysql", "mysql"),
+            SelectorOption("redis", "redis"),
+        ],
+        multi=True,
+    )
+
+    state.move(2)
+
+    assert state.submit() == ["redis"]
+
+
+def test_tui_instructions_include_q_cancel_shortcut():
+    single = _SelectionState(
+        options=[SelectorOption("mysql", "mysql")],
+        multi=False,
+    )
+    multi = _SelectionState(
+        options=[SelectorOption("mysql", "mysql")],
+        multi=True,
+    )
+
+    assert single.render_lines(prompt="action > ", header="Choose an action.")[-1] == (
+        "↑/↓ or j/k move • enter confirms • q/esc/c-c cancels"
+    )
+    assert multi.render_lines(prompt="start > ", header="Choose tunnels.")[-1] == (
+        "↑/↓ or j/k move • space toggles • enter confirms • q/esc/c-c cancels"
+    )
+
+
+def test_tui_render_lines_include_title_and_tunnel_motif():
+    state = _SelectionState(
+        options=[SelectorOption("mysql", "mysql")],
+        multi=False,
+    )
+
+    lines = state.render_lines(prompt="action > ", header="Choose an action.")
+
+    assert lines[:5] == [
+        "ssm tunnel manager",
+        "◎────◎",
+        "",
+        "action >",
+        "Choose an action.",
+    ]
+
+
+def test_tui_reports_missing_prompt_toolkit_dependency(monkeypatch):
+    selector = Selector()
+
+    def fake_builder(*args, **kwargs):
+        raise SelectorError("prompt_toolkit is required for `ssm-tunnel tui`.")
+
+    monkeypatch.setattr(selector, "_build_application", fake_builder)
+
+    with pytest.raises(SelectorError, match="prompt_toolkit is required"):
         selector.select_one(
             [SelectorOption("status", "status")],
             prompt="action > ",
@@ -273,23 +365,24 @@ def test_tui_reports_missing_fzf_binary(monkeypatch):
         )
 
 
-def test_tui_selector_uses_fzf_multi_for_lifecycle_actions(monkeypatch):
+def test_tui_selector_runs_in_process_application(monkeypatch):
     recorded = {}
 
-    def fake_run(command, *, input, text, capture_output, check):
-        recorded["command"] = command
-        recorded["input"] = input
-        recorded["text"] = text
-        recorded["capture_output"] = capture_output
-        recorded["check"] = check
-        return subprocess.CompletedProcess(
-            command, 0, stdout="redis\nmysql\n", stderr=""
-        )
+    class FakeApplication:
+        def run(self):
+            return ["redis", "mysql"]
 
-    monkeypatch.setattr("ssm_tunnel_manager.tui.shutil.which", lambda _: "/usr/bin/fzf")
-    monkeypatch.setattr("ssm_tunnel_manager.tui.subprocess.run", fake_run)
+    def fake_builder(state, *, prompt: str, header: str):
+        recorded["prompt"] = prompt
+        recorded["header"] = header
+        recorded["multi"] = state.multi
+        recorded["options"] = [option.label for option in state.options]
+        return FakeApplication()
 
-    selection = Selector().select_many(
+    selector = Selector()
+    monkeypatch.setattr(selector, "_build_application", fake_builder)
+
+    selection = selector.select_many(
         [
             SelectorOption("mysql", "mysql"),
             SelectorOption("redis", "redis"),
@@ -299,20 +392,101 @@ def test_tui_selector_uses_fzf_multi_for_lifecycle_actions(monkeypatch):
     )
 
     assert selection == ["redis", "mysql"]
-    assert recorded["command"] == [
-        "/usr/bin/fzf",
-        "--prompt",
-        "start > ",
-        "--header",
-        "Choose one or more tunnels to start.",
-        "--height",
-        "40%",
-        "--layout",
-        "reverse",
-        "--border",
-        "--multi",
-    ]
-    assert recorded["input"] == "mysql\nredis\n"
-    assert recorded["text"] is True
-    assert recorded["capture_output"] is True
-    assert recorded["check"] is False
+    assert recorded == {
+        "prompt": "start > ",
+        "header": "Choose one or more tunnels to start.",
+        "multi": True,
+        "options": ["mysql", "redis"],
+    }
+
+
+def test_tui_selector_uses_full_screen_app_and_q_cancel_binding(monkeypatch):
+    recorded = {}
+
+    class FakeApplication:
+        def __init__(self, **kwargs):
+            self.layout = kwargs["layout"]
+            self.key_bindings = kwargs["key_bindings"]
+            self.style = kwargs["style"]
+            self.full_screen = kwargs["full_screen"]
+            self.erase_when_done = kwargs["erase_when_done"]
+            self.mouse_support = kwargs["mouse_support"]
+
+    class FakeKeyBindings:
+        def __init__(self):
+            self.bindings = []
+
+        def add(self, *keys):
+            def decorator(handler):
+                self.bindings.append((keys, handler.__name__))
+                return handler
+
+            return decorator
+
+    def fake_hsplit(children):
+        recorded["hsplit_children"] = children
+        return ("hsplit", children)
+
+    def fake_layout(container):
+        recorded["layout_container"] = container
+        return ("layout", container)
+
+    class FakeWindow:
+        def __init__(self, *, content, always_hide_cursor):
+            self.content = content
+            self.always_hide_cursor = always_hide_cursor
+
+    class FakeFormattedTextControl:
+        def __init__(self, text):
+            self.text = text
+
+    prompt_toolkit_module = types.ModuleType("prompt_toolkit")
+    application_module = types.ModuleType("prompt_toolkit.application")
+    application_module.Application = FakeApplication
+    key_binding_module = types.ModuleType("prompt_toolkit.key_binding")
+    key_binding_module.KeyBindings = FakeKeyBindings
+    layout_module = types.ModuleType("prompt_toolkit.layout")
+    layout_module.HSplit = fake_hsplit
+    layout_module.Layout = fake_layout
+    layout_module.Window = FakeWindow
+    controls_module = types.ModuleType("prompt_toolkit.layout.controls")
+    controls_module.FormattedTextControl = FakeFormattedTextControl
+
+    monkeypatch.setitem(sys.modules, "prompt_toolkit", prompt_toolkit_module)
+    monkeypatch.setitem(sys.modules, "prompt_toolkit.application", application_module)
+    monkeypatch.setitem(sys.modules, "prompt_toolkit.key_binding", key_binding_module)
+    monkeypatch.setitem(sys.modules, "prompt_toolkit.layout", layout_module)
+    monkeypatch.setitem(sys.modules, "prompt_toolkit.layout.controls", controls_module)
+
+    styles_module = types.ModuleType("prompt_toolkit.styles")
+
+    class FakeStyle:
+        @classmethod
+        def from_dict(cls, style_map):
+            return style_map
+
+    styles_module.Style = FakeStyle
+    monkeypatch.setitem(sys.modules, "prompt_toolkit.styles", styles_module)
+
+    selector = Selector()
+    app = selector._build_application(
+        _SelectionState(
+            options=[SelectorOption("status", "status")],
+            multi=False,
+        ),
+        prompt="action > ",
+        header="Choose an action.",
+    )
+
+    assert app.full_screen is True
+    assert app.erase_when_done is True
+    assert app.mouse_support is False
+    assert app.style["title"] == "bold ansicyan"
+    assert (("q",), "_cancel") in app.key_bindings.bindings
+    assert (("escape",), "_cancel") in app.key_bindings.bindings
+    assert (("c-c",), "_cancel") in app.key_bindings.bindings
+
+    control = recorded["hsplit_children"][0].content
+    fragments = control.text()
+    assert ("class:title", "ssm tunnel manager") in fragments
+    assert ("class:motif", "◎────◎") in fragments

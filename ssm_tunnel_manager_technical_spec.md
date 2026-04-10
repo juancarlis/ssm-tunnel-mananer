@@ -119,7 +119,7 @@ Implement a command-line backend that:
 
 #### Phase 2 - Interactive Terminal Launcher
 
-Add a terminal-driven interface using `fzf` or similar for quick selection and actions.
+Add a terminal-driven interface using an in-process selector such as `prompt_toolkit` for quick selection and actions.
 
 #### Phase 3 - Persistent TUI Dashboard
 
@@ -131,7 +131,7 @@ Preferred MVP stack:
 
 - Config: YAML
 - Core process management: shell or Python
-- Interactive UI: `fzf`
+- Interactive UI: `prompt_toolkit`
 - Optional backend runtime: `tmux`
 
 ### 5.3 Why This Is Recommended
@@ -571,7 +571,7 @@ The terminal UI should be intentionally simple.
 
 ### 15.1 MVP Interaction Model
 
-The first interactive layer may be built with `fzf`.
+The first interactive layer may be built with `prompt_toolkit`.
 
 Example actions:
 
@@ -618,7 +618,7 @@ At minimum, the tool should validate the presence of:
 - `aws`
 - AWS Session Manager Plugin
 - `tmux` if configured as backend
-- `fzf` if configured for interactive mode
+- in-process selector support if interactive mode is enabled
 
 ### 16.2 Configuration Checks
 
@@ -719,7 +719,7 @@ The recommended implementation path is:
 2. implement a stable CLI backend
 3. validate direct-process execution
 4. fall back to `tmux` backend if process management is unreliable
-5. add `fzf` as the first interactive UI
+5. add an in-process Python selector as the first interactive UI
 6. only later build a richer persistent TUI if the tool proves useful in daily workflow
 
 ### 19.2 Why This Is the Best Tradeoff

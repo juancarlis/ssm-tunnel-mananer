@@ -125,11 +125,13 @@ def test_readme_documents_help_and_tui_workflow():
 
     assert "uv run ssm-tunnel help" in readme
     assert "uv run ssm-tunnel tui" in readme
-    assert "`fzf`" in readme
     assert "action first" in readme
-    assert "normal `fzf` behavior" in readme
+    assert "`prompt_toolkit`" in readme
+    assert "in-process selector" in readme
     assert "arrow keys move through the list" in readme
-    assert "`Tab` to mark multiple tunnels" in readme
+    assert "`j` / `k`" in readme
+    assert "`Space` toggles" in readme
+    assert "`Esc` cancels" in readme
     assert "`upgrade`, `login`, and `uninstall` are action-only flows" in readme
     assert "`logs` remains single-tunnel only" in readme
     assert "`status` offers `all`" in readme

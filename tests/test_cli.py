@@ -780,14 +780,16 @@ def test_cli_tui_reports_selector_errors(cli_env, monkeypatch, capsys):
     config_path, _runtime_root, _backend = cli_env
     monkeypatch.setattr(
         "ssm_tunnel_manager.tui.launch",
-        lambda config: (_ for _ in ()).throw(SelectorError("fzf is required")),
+        lambda config: (_ for _ in ()).throw(
+            SelectorError("prompt_toolkit is required")
+        ),
     )
 
     with pytest.raises(SystemExit) as excinfo:
         main(["--config", str(config_path), "tui"])
 
     assert excinfo.value.code == 4
-    assert "TUI error: fzf is required" in capsys.readouterr().err
+    assert "TUI error: prompt_toolkit is required" in capsys.readouterr().err
 
 
 def test_cli_status_without_name_shows_all_tunnels(cli_env, capsys):

@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Terminal-first AWS SSM tunnel manager"
 requires-python = ">=3.11"
 dependencies = [
+  "prompt_toolkit>=3.0",
   "PyYAML>=6.0",
 ]
 

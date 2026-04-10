@@ -46,6 +46,19 @@ def test_dependency_checks_include_tmux_for_tmux_backend(monkeypatch):
     assert checks[-1].ok is False
 
 
+def test_dependency_checks_do_not_require_external_selector_binary(monkeypatch):
+    locations = {
+        "aws": "/usr/bin/aws",
+        "session-manager-plugin": "/usr/bin/session-manager-plugin",
+        "tmux": "/usr/bin/tmux",
+    }
+    monkeypatch.setattr("shutil.which", lambda name: locations.get(name))
+
+    checks = check_dependencies("tmux", interactive=True)
+
+    assert [check.name for check in checks] == ["aws", "session-manager-plugin", "tmux"]
+
+
 def test_read_process_command_normalizes_proc_cmdline(tmp_path):
     cmdline_path = tmp_path / "4242" / "cmdline"
     cmdline_path.parent.mkdir(parents=True)

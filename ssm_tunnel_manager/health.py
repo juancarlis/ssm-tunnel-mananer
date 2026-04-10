@@ -25,8 +25,6 @@ def check_dependencies(
     ]
     if backend == "tmux":
         checks.append(_check_binary("tmux", "tmux found"))
-    if interactive:
-        checks.append(_check_binary("fzf", "fzf found"))
     return checks
 
 

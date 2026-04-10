@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import shutil
-import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from ssm_tunnel_manager.models import AppConfig
+
+
+_TITLE = "ssm tunnel manager"
+_MOTIF = "◎────◎"
 
 
 class SelectorError(RuntimeError):
@@ -21,6 +24,110 @@ class SelectionCancelled(RuntimeError):
 class SelectorOption:
     label: str
     value: str | None
+
+
+@dataclass
+class _SelectionState:
+    options: Sequence[SelectorOption]
+    multi: bool
+    cursor: int = 0
+    selected_values: set[str | None] | None = None
+
+    def __post_init__(self) -> None:
+        self.selected_values = set() if self.multi else None
+
+    def move(self, offset: int) -> None:
+        if not self.options:
+            return
+        self.cursor = (self.cursor + offset) % len(self.options)
+
+    def toggle_current(self) -> None:
+        if not self.multi or self.selected_values is None:
+            return
+
+        current_value = self.current_option.value
+        if current_value == _MULTI_ALL_SENTINEL:
+            if current_value in self.selected_values:
+                self.selected_values.remove(current_value)
+            else:
+                self.selected_values = {current_value}
+            return
+
+        self.selected_values.discard(_MULTI_ALL_SENTINEL)
+        if current_value in self.selected_values:
+            self.selected_values.remove(current_value)
+        else:
+            self.selected_values.add(current_value)
+
+    @property
+    def current_option(self) -> SelectorOption:
+        return self.options[self.cursor]
+
+    def submit(self) -> list[str | None]:
+        if not self.multi:
+            return [self.current_option.value]
+
+        assert self.selected_values is not None
+        if not self.selected_values:
+            return [self.current_option.value]
+
+        return [
+            option.value
+            for option in self.options
+            if option.value in self.selected_values
+        ]
+
+    def render_lines(self, *, prompt: str, header: str) -> list[str]:
+        lines = [_TITLE, _MOTIF, "", prompt.rstrip(), header, ""]
+        for index, option in enumerate(self.options):
+            cursor_marker = "›" if index == self.cursor else " "
+            if self.multi and self.selected_values is not None:
+                checked = "x" if option.value in self.selected_values else " "
+                label = f"[{checked}] {option.label}"
+            else:
+                label = option.label
+            lines.append(f"{cursor_marker} {label}")
+
+        lines.extend(
+            [
+                "",
+                self._instructions(),
+            ]
+        )
+        return lines
+
+    def render_fragments(self, *, prompt: str, header: str) -> list[tuple[str, str]]:
+        fragments: list[tuple[str, str]] = []
+        for line in self.render_lines(prompt=prompt, header=header):
+            fragments.extend(self._line_fragments(line))
+            fragments.append(("", "\n"))
+        if fragments:
+            fragments.pop()
+        return fragments
+
+    def _instructions(self) -> str:
+        if self.multi:
+            return (
+                "↑/↓ or j/k move • space toggles • enter confirms • q/esc/c-c cancels"
+            )
+        return "↑/↓ or j/k move • enter confirms • q/esc/c-c cancels"
+
+    def _line_fragments(self, line: str) -> list[tuple[str, str]]:
+        if line == _TITLE:
+            return [("class:title", line)]
+        if line == _MOTIF:
+            return [("class:motif", line)]
+        if line.endswith(">"):
+            return [("class:prompt", line)]
+        if line == self._instructions():
+            return [("class:instructions", line)]
+        if line.startswith("› "):
+            return [("class:cursor", "›"), ("", line[1:])]
+        if line.startswith("  "):
+            return [("class:muted", " "), ("", line[1:])]
+        if not line:
+            return [("", line)]
+        return [("class:header", line)]
 
 
 _ACTION_OPTIONS = (
@@ -113,9 +220,6 @@ def launch(
 
 
 class Selector:
-    def __init__(self, executable: str = "fzf") -> None:
-        self.executable = executable
-
     def select_one(
         self,
         options: Sequence[SelectorOption],
@@ -125,7 +229,9 @@ class Selector:
     ) -> str | None:
         selection = self._run(options, prompt=prompt, header=header, multi=False)
         if len(selection) != 1:
-            raise SelectorError("Expected a single selection from fzf.")
+            raise SelectorError(
+                "Expected a single selection from the interactive selector."
+            )
         return selection[0]
 
     def select_many(
@@ -137,7 +243,9 @@ class Selector:
     ) -> list[str]:
         selection = self._run(options, prompt=prompt, header=header, multi=True)
         if not selection:
-            raise SelectorError("Expected at least one selection from fzf.")
+            raise SelectorError(
+                "Expected at least one selection from the interactive selector."
+            )
         return selection
 
     def _run(
@@ -151,44 +259,95 @@ class Selector:
         if not options:
             raise SelectorError("No options available for selection.")
 
-        executable = shutil.which(self.executable)
-        if executable is None:
+        state = _SelectionState(options=options, multi=multi)
+        app = self._build_application(state, prompt=prompt, header=header)
+        try:
+            result = app.run()
+        except KeyboardInterrupt as exc:
+            raise SelectionCancelled() from exc
+
+        if result is None:
+            raise SelectionCancelled()
+        return result
+
+    def _build_application(
+        self,
+        state: _SelectionState,
+        *,
+        prompt: str,
+        header: str,
+    ) -> Any:
+        try:
+            from prompt_toolkit.application import Application
+            from prompt_toolkit.styles import Style
+            from prompt_toolkit.key_binding import KeyBindings
+            from prompt_toolkit.layout import HSplit, Layout, Window
+            from prompt_toolkit.layout.controls import FormattedTextControl
+        except ImportError as exc:
             raise SelectorError(
-                "fzf is required for `ssm-tunnel tui` but was not found in PATH. "
-                "Install `fzf` to use the interactive selector."
-            )
+                "prompt_toolkit is required for `ssm-tunnel tui`. Reinstall the package "
+                "with runtime dependencies to use the interactive selector."
+            ) from exc
 
-        labels = [option.label for option in options]
-        by_label = {option.label: option.value for option in options}
-        command = [
-            executable,
-            "--prompt",
-            prompt,
-            "--header",
-            header,
-            "--height",
-            "40%",
-            "--layout",
-            "reverse",
-            "--border",
-        ]
-        if multi:
-            command.append("--multi")
+        bindings = KeyBindings()
 
-        result = subprocess.run(
-            command,
-            input="\n".join(labels) + "\n",
-            text=True,
-            capture_output=True,
-            check=False,
+        @bindings.add("up")
+        @bindings.add("k")
+        def _move_up(event) -> None:
+            state.move(-1)
+            event.app.invalidate()
+
+        @bindings.add("down")
+        @bindings.add("j")
+        def _move_down(event) -> None:
+            state.move(1)
+            event.app.invalidate()
+
+        @bindings.add("enter")
+        def _submit(event) -> None:
+            event.app.exit(result=state.submit())
+
+        @bindings.add("escape")
+        @bindings.add("q")
+        @bindings.add("c-c")
+        def _cancel(event) -> None:
+            event.app.exit(result=None)
+
+        if state.multi:
+
+            @bindings.add("space")
+            def _toggle(event) -> None:
+                state.toggle_current()
+                event.app.invalidate()
+
+        style = Style.from_dict(
+            {
+                "title": "bold ansicyan",
+                "motif": "ansiblue",
+                "prompt": "bold ansigreen",
+                "header": "ansiyellow",
+                "instructions": "ansibrightblack",
+                "cursor": "bold ansimagenta",
+                "muted": "ansibrightblack",
+            }
         )
 
-        if result.returncode == 0:
-            selected_labels = [line for line in result.stdout.splitlines() if line]
-            return [by_label[label] for label in selected_labels]
-        if result.returncode == 130:
-            raise SelectionCancelled()
-        raise SelectorError(result.stderr.strip() or "fzf exited unexpectedly.")
+        def _get_text() -> list[tuple[str, str]]:
+            return state.render_fragments(prompt=prompt, header=header)
+
+        body = Window(
+            content=FormattedTextControl(_get_text),
+            always_hide_cursor=True,
+        )
+
+        return Application(
+            layout=Layout(HSplit([body])),
+            key_bindings=bindings,
+            style=style,
+            full_screen=True,
+            erase_when_done=True,
+            mouse_support=False,
+        )
 
 
 def _select_action(selector: Selector) -> str:
