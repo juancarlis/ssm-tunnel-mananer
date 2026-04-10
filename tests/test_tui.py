@@ -145,7 +145,23 @@ def test_tui_logs_keeps_single_tunnel_selection():
     )
 
 
-def test_tui_lifecycle_actions_use_multi_select():
+def test_tui_start_offers_explicit_all_option_and_maps_to_cli_all_flag():
+    selector = FakeSelector(["start", ["all"]])
+
+    selection = launch(build_config("mysql", "redis", "admin"), selector=selector)
+
+    assert selection.command == "start"
+    assert selection.names == []
+    assert selection.all is True
+    assert selector.calls[-1] == (
+        "many",
+        ["all", "mysql", "redis", "admin"],
+        "start > ",
+        "Choose one or more tunnels to start, or select all.",
+    )
+
+
+def test_tui_start_keeps_multi_select_for_specific_tunnels():
     selector = FakeSelector(["start", ["admin", "mysql"]])
 
     selection = launch(build_config("mysql", "redis", "admin"), selector=selector)
@@ -155,9 +171,9 @@ def test_tui_lifecycle_actions_use_multi_select():
     assert selection.all is False
     assert selector.calls[-1] == (
         "many",
-        ["mysql", "redis", "admin"],
+        ["all", "mysql", "redis", "admin"],
         "start > ",
-        "Choose one or more tunnels to start.",
+        "Choose one or more tunnels to start, or select all.",
     )
 
 

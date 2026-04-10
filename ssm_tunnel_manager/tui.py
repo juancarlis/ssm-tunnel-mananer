@@ -89,18 +89,18 @@ def launch(
             )
             return argparse.Namespace(command="logs", name=name)
 
-        if selected_action == "stop":
+        if selected_action in {"start", "stop"}:
             names = active_selector.select_many(
                 [
-                    _stop_all_option(),
+                    _multi_all_option(),
                     *[SelectorOption(name, name) for name in tunnel_names],
                 ],
-                prompt="stop > ",
-                header="Choose one or more tunnels to stop, or select all.",
+                prompt=f"{selected_action} > ",
+                header=f"Choose one or more tunnels to {selected_action}, or select all.",
             )
             if _MULTI_ALL_SENTINEL in names:
-                return argparse.Namespace(command="stop", names=[], all=True)
-            return argparse.Namespace(command="stop", names=names, all=False)
+                return argparse.Namespace(command=selected_action, names=[], all=True)
+            return argparse.Namespace(command=selected_action, names=names, all=False)
 
         names = active_selector.select_many(
             [SelectorOption(name, name) for name in tunnel_names],
@@ -201,5 +201,5 @@ def _select_action(selector: Selector) -> str:
     return action
 
 
-def _stop_all_option() -> SelectorOption:
+def _multi_all_option() -> SelectorOption:
     return SelectorOption("all", _MULTI_ALL_SENTINEL)
