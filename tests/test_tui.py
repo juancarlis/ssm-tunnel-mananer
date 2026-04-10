@@ -129,7 +129,7 @@ def test_tui_prompts_for_action_first_and_quit_exits_cleanly():
             "action > ",
             "Choose an action.",
             False,
-            [],
+            ["Running now", "• none"],
         )
     ]
 
@@ -159,7 +159,7 @@ def test_tui_status_supports_all_tunnels_after_action_selection():
             "action > ",
             "Choose an action.",
             False,
-            [],
+            ["Running now", "• none"],
         ),
         (
             "one",
@@ -170,6 +170,40 @@ def test_tui_status_supports_all_tunnels_after_action_selection():
             [],
         ),
     ]
+
+
+def test_tui_action_screen_shows_current_running_summary(monkeypatch):
+    config = build_config("mysql", "redis")
+    selector = FakeSelector(["quit"])
+
+    monkeypatch.setattr(
+        "ssm_tunnel_manager.tui._running_tunnel_summary_lines",
+        lambda config_arg: [
+            "Running now",
+            "• mysql  localhost:13001 → mysql.internal:3306",
+        ],
+    )
+
+    assert launch(config, selector=selector) is None
+    assert selector.calls[0] == (
+        "one",
+        [
+            "status",
+            "upgrade",
+            "login",
+            "start",
+            "stop",
+            "restart",
+            "logs",
+            "help",
+            "uninstall",
+            "quit",
+        ],
+        "action > ",
+        "Choose an action.",
+        False,
+        ["Running now", "• mysql  localhost:13001 → mysql.internal:3306"],
+    )
 
 
 def test_tui_logs_keeps_single_tunnel_selection():
@@ -351,7 +385,7 @@ def test_tui_escape_from_nested_screen_goes_back_to_action_selection():
             "action > ",
             "Choose an action.",
             False,
-            [],
+            ["Running now", "• none"],
         ),
         (
             "one",
@@ -378,7 +412,7 @@ def test_tui_escape_from_nested_screen_goes_back_to_action_selection():
             "action > ",
             "Choose an action.",
             False,
-            [],
+            ["Running now", "• none"],
         ),
         (
             "one",

@@ -188,7 +188,14 @@ def launch(
         selected_action = action
         while True:
             if selected_action is None:
-                selected_action = _select_action(active_selector)
+                selected_action = _select_action(
+                    active_selector,
+                    context_lines=(
+                        _running_tunnel_summary_lines(config)
+                        if config is not None
+                        else ()
+                    ),
+                )
             if selected_action == "quit":
                 return None
             if selected_action == "help":
@@ -442,11 +449,12 @@ class Selector:
         )
 
 
-def _select_action(selector: Selector) -> str:
+def _select_action(selector: Selector, *, context_lines: Sequence[str] = ()) -> str:
     action = selector.select_one(
         _ACTION_OPTIONS,
         prompt="action > ",
         header="Choose an action.",
+        context_lines=context_lines,
     )
     assert action is not None
     return action

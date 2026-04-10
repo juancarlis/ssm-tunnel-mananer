@@ -108,8 +108,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "tui":
         from ssm_tunnel_manager.tui import SelectorError, launch
 
+        config = _load_config_if_available(args.config)
         try:
-            selection = launch(None)
+            selection = launch(config)
         except SelectorError as exc:
             parser.exit(status=4, message=f"TUI error: {exc}\n")
         if selection is None:
@@ -121,8 +122,9 @@ def main(argv: list[str] | None = None) -> int:
         if selection.command == "uninstall":
             return _run_uninstall_command()
 
-        config = _load_config_or_exit(args.config, parser)
         if selection.command == "tui":
+            if config is None:
+                config = _load_config_or_exit(args.config, parser)
             try:
                 selection = launch(config, action=selection.action)
             except SelectorError as exc:
@@ -130,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
             if selection is None:
                 return 0
 
+        if config is None:
+            config = _load_config_or_exit(args.config, parser)
         return _dispatch_command(selection, parser, config)
 
     config = _load_config_or_exit(args.config, parser)
@@ -144,6 +148,13 @@ def _load_config_or_exit(
     except ConfigError as exc:
         parser.exit(status=2, message=f"Config error: {exc}\n")
         raise AssertionError("unreachable")
+
+
+def _load_config_if_available(config_path: str | None) -> AppConfig | None:
+    try:
+        return load_config(config_path)
+    except ConfigError:
+        return None
 
 
 def _run_help_command(parser: argparse.ArgumentParser) -> int:

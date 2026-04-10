@@ -685,7 +685,7 @@ def test_cli_tui_uninstall_selection_dispatches_without_loading_config(
         cli_module,
         "load_config",
         lambda path=None: (_ for _ in ()).throw(
-            AssertionError("load_config should not run")
+            cli_module.ConfigError(f"Config file not found: {path}")
         ),
         raising=False,
     )
@@ -718,7 +718,7 @@ def test_cli_tui_upgrade_selection_dispatches_without_loading_config(
         cli_module,
         "load_config",
         lambda path=None: (_ for _ in ()).throw(
-            AssertionError("load_config should not run")
+            cli_module.ConfigError(f"Config file not found: {path}")
         ),
         raising=False,
     )
@@ -754,10 +754,50 @@ def test_cli_tui_loads_config_after_selecting_tunnel_backed_action(
 
     def fake_launch(config, *, selector=None, action=None):
         launch_calls.append((config, action))
+        return argparse.Namespace(command="status", name=None)
+
+    monkeypatch.setattr("ssm_tunnel_manager.tui.launch", fake_launch)
+
+    assert main(["--config", str(config_path), "tui"]) == 0
+
+    out = capsys.readouterr().out
+    assert_summary_table(
+        out,
+        [
+            summary_cells("mysql", "stopped", "enabled", 13306),
+            summary_cells("redis", "stopped", "enabled", 16379),
+            summary_cells("admin", "stopped", "disabled", 18443),
+        ],
+    )
+    assert len(launch_calls) == 1
+    assert launch_calls[0][1] is None
+    assert launch_calls[0][0].effective_tunnels
+
+
+def test_cli_tui_falls_back_to_action_only_launch_when_initial_config_load_fails(
+    tmp_path, monkeypatch, capsys
+):
+    launch_calls = []
+    load_calls = []
+    config_path = write_config(tmp_path)
+
+    monkeypatch.setattr(
+        "ssm_tunnel_manager.paths.default_data_dir", lambda: tmp_path / "runtime"
+    )
+
+    def fake_load_config(path=None):
+        load_calls.append(path)
+        if len(load_calls) == 1:
+            raise cli_module.ConfigError("Config file not found: /missing.yaml")
+        return load_config_file(path)
+
+    def fake_launch(config, *, selector=None, action=None):
+        launch_calls.append((config, action))
         if config is None:
             return argparse.Namespace(command="tui", action="status")
         return argparse.Namespace(command="status", name=None)
 
+    monkeypatch.setattr(cli_module, "load_config", fake_load_config)
     monkeypatch.setattr("ssm_tunnel_manager.tui.launch", fake_launch)
 
     assert main(["--config", str(config_path), "tui"]) == 0
@@ -774,6 +814,7 @@ def test_cli_tui_loads_config_after_selecting_tunnel_backed_action(
     assert launch_calls[0] == (None, None)
     assert launch_calls[1][1] == "status"
     assert launch_calls[1][0].effective_tunnels
+    assert load_calls == [str(config_path), str(config_path)]
 
 
 def test_cli_tui_reports_selector_errors(cli_env, monkeypatch, capsys):
